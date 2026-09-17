@@ -69,6 +69,7 @@ export default function ExamDetailPage() {
   const [assignOpen, setAssignOpen] = useState(false);
   const [startTarget, setStartTarget] = useState<StartAttemptTarget | null>(null);
   const [publishTarget, setPublishTarget] = useState<{ publish: boolean; attemptIds: number[] } | null>(null);
+  const [removeAssignment, setRemoveAssignment] = useState<ExamAssignment | null>(null);
   const [selectedAttempts, setSelectedAttempts] = useState<number[]>([]);
 
   const detail = useQuery({
@@ -126,10 +127,14 @@ export default function ExamDetailPage() {
   const unassign = useMutation({
     mutationFn: (assignmentId: number) => api.delete(`/examinations/${examId}/assignments/${assignmentId}`),
     onSuccess: async () => {
+      setRemoveAssignment(null);
       toast.notify('Assignment removed.', 'success');
       await queryClient.invalidateQueries({ queryKey: ['examination', examId] });
     },
-    onError: (error) => toast.notify(error instanceof ApiError ? error.message : 'The assignment could not be removed.', 'error'),
+    onError: (error) => {
+      setRemoveAssignment(null);
+      toast.notify(error instanceof ApiError ? error.message : 'The assignment could not be removed.', 'error');
+    },
   });
 
   const totalMarks = useMemo(
@@ -259,7 +264,7 @@ export default function ExamDetailPage() {
                 align: 'right',
                 render: (row) =>
                   isOwner ? (
-                    <Button size="sm" variant="ghost" onClick={() => unassign.mutate(row.id)}>
+                    <Button size="sm" variant="ghost" onClick={() => setRemoveAssignment(row)}>
                       Remove
                     </Button>
                   ) : null,
@@ -456,6 +461,26 @@ export default function ExamDetailPage() {
         busy={publishSelected.isPending}
         onConfirm={() => publishTarget && publishSelected.mutate(publishTarget)}
         onCancel={() => setPublishTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(removeAssignment)}
+        title="Remove this assignment"
+        message={
+          <>
+            {removeAssignment?.class_name
+              ? `The candidates in ${removeAssignment.class_name} will no longer see this examination.`
+              : removeAssignment?.group_name
+                ? `The candidates in ${removeAssignment.group_name} will no longer see this examination.`
+                : `${removeAssignment?.student_name ?? 'This candidate'} will no longer see this examination.`}{' '}
+            Attempts already started or submitted are preserved. An assignment cannot be removed once a candidate has
+            attempted the examination.
+          </>
+        }
+        confirmLabel="Remove assignment"
+        busy={unassign.isPending}
+        onConfirm={() => removeAssignment && unassign.mutate(removeAssignment.id)}
+        onCancel={() => setRemoveAssignment(null)}
       />
 
       {publishable.length === 0 && rows.length > 0 ? (

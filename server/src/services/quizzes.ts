@@ -391,6 +391,43 @@ export function assignQuiz(
   return { assigned: notifyUserIds.size };
 }
 
+export function unassignQuiz(
+  db: Db,
+  actor: QuizActor,
+  quizId: number,
+  assignmentId: number,
+  meta: { ip?: string | null; userAgent?: string | null } = {},
+): void {
+  const quiz = getQuizOr404(db, actor, quizId);
+  assertQuizOwnership(actor, quiz);
+  const assignment = db
+    .prepare('SELECT * FROM quiz_assignments WHERE id = ? AND quiz_id = ?')
+    .get(assignmentId, quizId) as any;
+  if (!assignment) throw notFound('Assignment not found.');
+
+  const attempts = db
+    .prepare("SELECT COUNT(*) AS c FROM attempts WHERE quiz_id = ? AND status != 'VOID'")
+    .get(quizId) as { c: number };
+  if (attempts.c > 0) {
+    throw conflict('Candidates have already attempted this quiz, so assignments can no longer be removed.');
+  }
+
+  db.prepare('DELETE FROM quiz_assignments WHERE id = ?').run(assignmentId);
+  recordAudit(db, {
+    institutionId: quiz.institution_id,
+    userId: actor.id,
+    actorName: actor.fullName,
+    actorRole: actor.roleCode,
+    action: 'quiz.unassigned',
+    category: 'exam',
+    resourceType: 'quiz',
+    resourceId: quizId,
+    description: `Removed an assignment from "${quiz.title}"`,
+    metadata: { assignmentId },
+    ...meta,
+  });
+}
+
 export function publishQuizResults(
   db: Db,
   actor: QuizActor,

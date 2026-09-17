@@ -576,6 +576,186 @@ describe('question bank integrity', () => {
   });
 });
 
+describe('study groups and paper assignments', () => {
+  /** A class belonging to the second tenant, used to prove cross-institution checks. */
+  const insertForeignClass = () => {
+    const timestamp = nowIso();
+    return Number(
+      db
+        .prepare(
+          `INSERT INTO classes (institution_id, name, code, academic_year, created_at, updated_at)
+           VALUES (?, 'Beta Class', 'B-1', '2026', ?, ?)`,
+        )
+        .run(fixture.otherInstitutionId, timestamp, timestamp).lastInsertRowid,
+    );
+  };
+
+  it('updates a study group and records who changed it', async () => {
+    const admin = await harness.login('admin@alpha.test');
+    const response = await admin.patch(`/api/groups/${fixture.groupId}`).send({
+      name: 'Revision group (renamed)',
+      description: 'Weekly problem clinic',
+      classId: fixture.classId,
+    });
+    expect(response.status).toBe(200);
+    expect(response.body.data.name).toBe('Revision group (renamed)');
+    expect(response.body.data.description).toBe('Weekly problem clinic');
+    expect(response.body.data.class_id).toBe(fixture.classId);
+
+    const audit = db.prepare("SELECT * FROM audit_logs WHERE action = 'group.updated'").get() as any;
+    expect(audit).toBeTruthy();
+    expect(audit.resource_id).toBe(String(fixture.groupId)); // audit rows store the id as text
+    expect(audit.actor_role).toBe('institution_admin');
+
+    const reread = await admin.get(`/api/groups/${fixture.groupId}`);
+    expect(reread.body.data.group.name).toBe('Revision group (renamed)');
+  });
+
+  it('keeps a group inside its own institution and refuses a foreign class', async () => {
+    const foreignClassId = insertForeignClass();
+    const admin = await harness.login('admin@alpha.test');
+
+    const crossTenantClass = await admin.patch(`/api/groups/${fixture.groupId}`).send({ classId: foreignClassId });
+    expect(crossTenantClass.status).toBe(422);
+    expect(crossTenantClass.body.error.message).toMatch(/same institution/i);
+
+    // The rejected update left the group untouched.
+    const untouched = db.prepare('SELECT class_id FROM groups WHERE id = ?').get(fixture.groupId) as any;
+    expect(untouched.class_id).toBe(fixture.classId);
+
+    // A group in the other tenant is not even visible to this administrator.
+    const platform = await harness.login('platform@examsys.test');
+    const foreign = await platform.post('/api/groups').send({
+      name: 'Beta group',
+      institutionId: fixture.otherInstitutionId,
+    });
+    expect(foreign.status).toBe(201);
+    const foreignId = foreign.body.data.id;
+    expect((await admin.patch(`/api/groups/${foreignId}`).send({ name: 'Hijacked group' })).status).toBe(404);
+    expect((await admin.delete(`/api/groups/${foreignId}`)).status).toBe(404);
+    expect((await admin.patch('/api/groups/999999').send({ name: 'Ghost group' })).status).toBe(404);
+  });
+
+  it('validates the payload and requires the group permission', async () => {
+    const admin = await harness.login('admin@alpha.test');
+    expect((await admin.patch(`/api/groups/${fixture.groupId}`).send({ name: 'x' })).status).toBe(422);
+
+    const student = await harness.login('student@alpha.test');
+    expect((await student.patch(`/api/groups/${fixture.groupId}`).send({ name: 'Student edit' })).status).toBe(403);
+    expect((await student.delete(`/api/groups/${fixture.groupId}`)).status).toBe(403);
+  });
+
+  it('removes a group together with its membership rows', async () => {
+    const admin = await harness.login('admin@alpha.test');
+    const members = db.prepare('SELECT COUNT(*) AS c FROM group_members WHERE group_id = ?').get(fixture.groupId) as {
+      c: number;
+    };
+    expect(members.c).toBe(1);
+
+    const response = await admin.delete(`/api/groups/${fixture.groupId}`);
+    expect(response.status).toBe(200);
+    expect(response.body.data.membersRemoved).toBe(1);
+
+    expect(db.prepare('SELECT id FROM groups WHERE id = ?').get(fixture.groupId)).toBeUndefined();
+    const leftover = db.prepare('SELECT COUNT(*) AS c FROM group_members WHERE group_id = ?').get(fixture.groupId) as {
+      c: number;
+    };
+    expect(leftover.c).toBe(0);
+
+    const audit = db.prepare("SELECT * FROM audit_logs WHERE action = 'group.deleted'").get() as any;
+    expect(audit).toBeTruthy();
+    expect(JSON.parse(audit.metadata).memberCount).toBe(1);
+  });
+
+  it('refuses to delete a group that is still assigned to a paper', async () => {
+    db.prepare('INSERT INTO exam_assignments (exam_id, group_id, assigned_by, assigned_at) VALUES (?,?,?,?)').run(
+      fixture.examId,
+      fixture.groupId,
+      fixture.adminUserId,
+      nowIso(),
+    );
+
+    const admin = await harness.login('admin@alpha.test');
+    const response = await admin.delete(`/api/groups/${fixture.groupId}`);
+    expect(response.status).toBe(409);
+    expect(response.body.error.message).toMatch(/still assigned/i);
+
+    // The group and the assignment that would have cascaded away are both intact.
+    expect(db.prepare('SELECT id FROM groups WHERE id = ?').get(fixture.groupId)).toBeTruthy();
+    const assignments = db
+      .prepare('SELECT COUNT(*) AS c FROM exam_assignments WHERE group_id = ?')
+      .get(fixture.groupId) as { c: number };
+    expect(assignments.c).toBe(1);
+  });
+
+  it('creates a quiz, assigns it to a class and removes the assignment', async () => {
+    const admin = await harness.login('admin@alpha.test');
+    const created = await admin.post('/api/quizzes').send({
+      subjectId: fixture.subjectId,
+      classId: fixture.classId,
+      title: 'Week 4 recap quiz',
+      questionCount: 1,
+      timeLimitMinutes: 20,
+      maxAttempts: 1,
+      passPercentage: 50,
+      availableFrom: nowIso(),
+      availableUntil: addMinutes(nowIso(), 60 * 24),
+      questions: [{ questionId: fixture.objectiveQuestions[0], marks: 5, negativeMarks: 0 }],
+    });
+    expect(created.status).toBe(201);
+    const quizId = created.body.data.id;
+
+    const assigned = await admin.post(`/api/quizzes/${quizId}/assign`).send({ classIds: [fixture.classId] });
+    expect(assigned.status).toBe(200);
+
+    const detail = await admin.get(`/api/quizzes/${quizId}`);
+    expect(detail.body.data.assignments).toHaveLength(1);
+    const assignmentId = detail.body.data.assignments[0].id;
+
+    const removed = await admin.delete(`/api/quizzes/${quizId}/assignments/${assignmentId}`);
+    expect(removed.status).toBe(200);
+    expect((await admin.get(`/api/quizzes/${quizId}`)).body.data.assignments).toHaveLength(0);
+
+    const audit = db.prepare("SELECT * FROM audit_logs WHERE action = 'quiz.unassigned'").get() as any;
+    expect(audit).toBeTruthy();
+    expect(audit.resource_id).toBe(String(quizId));
+
+    // Removing it twice, or under a quiz that does not exist, is a clean 404.
+    expect((await admin.delete(`/api/quizzes/${quizId}/assignments/${assignmentId}`)).status).toBe(404);
+    expect((await admin.delete(`/api/quizzes/999999/assignments/${assignmentId}`)).status).toBe(404);
+  });
+
+  it('refuses to unassign a quiz once a candidate has attempted it', async () => {
+    const admin = await harness.login('admin@alpha.test');
+    const created = await admin.post('/api/quizzes').send({
+      subjectId: fixture.subjectId,
+      classId: fixture.classId,
+      title: 'Locked quiz',
+      questionCount: 1,
+      timeLimitMinutes: 15,
+      maxAttempts: 1,
+      passPercentage: 50,
+      availableFrom: nowIso(),
+      availableUntil: addMinutes(nowIso(), 60 * 24),
+      questions: [{ questionId: fixture.objectiveQuestions[0], marks: 5, negativeMarks: 0 }],
+    });
+    const quizId = created.body.data.id;
+    await admin.post(`/api/quizzes/${quizId}/assign`).send({ classIds: [fixture.classId] });
+    const assignmentId = (await admin.get(`/api/quizzes/${quizId}`)).body.data.assignments[0].id;
+
+    const timestamp = nowIso();
+    db.prepare(
+      `INSERT INTO attempts (institution_id, quiz_id, student_id, status, started_at, expires_at, last_activity_at, created_at, updated_at)
+       VALUES (?,?,?, 'SUBMITTED', ?, ?, ?, ?, ?)`,
+    ).run(fixture.institutionId, quizId, fixture.studentId, timestamp, addMinutes(timestamp, 15), timestamp, timestamp, timestamp);
+
+    const blocked = await admin.delete(`/api/quizzes/${quizId}/assignments/${assignmentId}`);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.message).toMatch(/already attempted/i);
+    expect((await admin.get(`/api/quizzes/${quizId}`)).body.data.assignments).toHaveLength(1);
+  });
+});
+
 describe('reports and audit', () => {
   it('produces a CSV export of the candidate result report', async () => {
     const admin = await harness.login('admin@alpha.test');

@@ -733,6 +733,97 @@ groupsRouter.post(
   }),
 );
 
+groupsRouter.patch(
+  '/:id',
+  requirePermission('group.manage'),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const body = parseWith(
+      z.object({
+        name: z.string().trim().min(2).max(120).optional(),
+        description: z.string().trim().max(400).optional().nullable(),
+        classId: z.coerce.number().int().positive().optional().nullable(),
+      }),
+      req.body,
+    );
+    const db = getDb();
+    const id = Number(req.params.id);
+    const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(id) as any;
+    if (!group) throw notFound('Group not found.');
+    if (scope(req) !== -1 && group.institution_id !== scope(req)) throw notFound('Group not found.');
+
+    // A group may only be attached to a class of its own institution; otherwise a
+    // class id from another tenant would leak into this institution's records.
+    if (body.classId != null) {
+      const klass = db.prepare('SELECT id, institution_id FROM classes WHERE id = ?').get(body.classId) as any;
+      if (!klass || klass.institution_id !== group.institution_id) {
+        throw validationError('Select a class from the same institution.');
+      }
+    }
+
+    db.prepare('UPDATE groups SET name = ?, description = ?, class_id = ?, updated_at = ? WHERE id = ?').run(
+      body.name ?? group.name,
+      body.description !== undefined ? body.description : group.description,
+      body.classId !== undefined ? body.classId : group.class_id,
+      nowIso(),
+      id,
+    );
+    recordAudit(db, {
+      institutionId: group.institution_id,
+      userId: req.user!.id,
+      actorName: req.user!.fullName,
+      actorRole: req.user!.roleCode,
+      action: 'group.updated',
+      category: 'academic',
+      resourceType: 'group',
+      resourceId: id,
+      description: `Updated group ${body.name ?? group.name}`,
+      metadata: { name: body.name ?? group.name, classId: body.classId !== undefined ? body.classId : group.class_id },
+      ...auditMeta(req),
+    });
+    return ok(res, db.prepare('SELECT * FROM groups WHERE id = ?').get(id));
+  }),
+);
+
+groupsRouter.delete(
+  '/:id',
+  requirePermission('group.manage'),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const db = getDb();
+    const id = Number(req.params.id);
+    const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(id) as any;
+    if (!group) throw notFound('Group not found.');
+    if (scope(req) !== -1 && group.institution_id !== scope(req)) throw notFound('Group not found.');
+
+    // Assignments are the record of who was expected to sit a paper, and the schema
+    // cascades them away with the group. Refuse instead of silently rewriting history.
+    const examUse = db.prepare('SELECT COUNT(*) AS c FROM exam_assignments WHERE group_id = ?').get(id) as { c: number };
+    const quizUse = db.prepare('SELECT COUNT(*) AS c FROM quiz_assignments WHERE group_id = ?').get(id) as { c: number };
+    const inUse = examUse.c + quizUse.c;
+    if (inUse > 0) {
+      throw conflict(
+        `This group is still assigned to ${inUse} paper${inUse === 1 ? '' : 's'}. Remove those assignments first — otherwise the record of who was expected to sit them would be lost.`,
+      );
+    }
+
+    const members = db.prepare('SELECT COUNT(*) AS c FROM group_members WHERE group_id = ?').get(id) as { c: number };
+    db.prepare('DELETE FROM groups WHERE id = ?').run(id);
+    recordAudit(db, {
+      institutionId: group.institution_id,
+      userId: req.user!.id,
+      actorName: req.user!.fullName,
+      actorRole: req.user!.roleCode,
+      action: 'group.deleted',
+      category: 'academic',
+      resourceType: 'group',
+      resourceId: id,
+      description: `Deleted group ${group.name}`,
+      metadata: { name: group.name, memberCount: members.c },
+      ...auditMeta(req),
+    });
+    return ok(res, { message: 'Group removed.', membersRemoved: members.c });
+  }),
+);
+
 groupsRouter.get(
   '/:id',
   requirePermission('group.manage', 'class.view'),

@@ -6,7 +6,15 @@ import { listQuery, parseWith } from '../lib/validation';
 import { paginate } from '../types';
 import type { AuthedRequest } from '../types';
 import { requireAuth, requirePermission } from '../middleware/auth';
-import { assignQuiz, createQuiz, getQuizOr404, publishQuizResults, transitionQuiz, updateQuiz } from '../services/quizzes';
+import {
+  assignQuiz,
+  createQuiz,
+  getQuizOr404,
+  publishQuizResults,
+  transitionQuiz,
+  unassignQuiz,
+  updateQuiz,
+} from '../services/quizzes';
 
 const router = Router();
 router.use(requireAuth);
@@ -202,6 +210,16 @@ router.post(
     const db = getDb();
     const result = assignQuiz(db, req.user!, Number(req.params.id), body, auditMeta(req));
     return ok(res, result);
+  }),
+);
+
+router.delete(
+  '/:id/assignments/:assignmentId',
+  requirePermission('quiz.manage'),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const db = getDb();
+    unassignQuiz(db, req.user!, Number(req.params.id), Number(req.params.assignmentId), auditMeta(req));
+    return ok(res, { message: 'Assignment removed.' });
   }),
 );
 

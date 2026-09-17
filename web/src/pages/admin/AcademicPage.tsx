@@ -9,6 +9,7 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   DataTable,
   Modal,
   PageHeader,
@@ -826,6 +827,7 @@ function GroupsPanel() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [editing, setEditing] = useState<Group | 'new' | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<Group | null>(null);
 
   const groups = useQuery({
     queryKey: ['groups', 'all'],
@@ -840,10 +842,14 @@ function GroupsPanel() {
   const remove = useMutation({
     mutationFn: (id: number) => api.delete(`/groups/${id}`),
     onSuccess: async () => {
+      setRemoveTarget(null);
       toast.notify('Group removed.', 'success');
       await queryClient.invalidateQueries({ queryKey: ['groups'] });
     },
-    onError: (caught) => toast.notify(caught instanceof ApiError ? caught.message : 'The group could not be removed.', 'error'),
+    onError: (caught) => {
+      setRemoveTarget(null);
+      toast.notify(caught instanceof ApiError ? caught.message : 'The group could not be removed.', 'error');
+    },
   });
 
   return (
@@ -889,7 +895,7 @@ function GroupsPanel() {
                     <button type="button" className="icon-button" aria-label={`Edit ${row.name}`} onClick={() => setEditing(row)}>
                       <IconEdit size={16} />
                     </button>
-                    <Button size="sm" variant="ghost" onClick={() => remove.mutate(row.id)}>
+                    <Button size="sm" variant="ghost" onClick={() => setRemoveTarget(row)}>
                       Remove
                     </Button>
                   </div>
@@ -909,6 +915,22 @@ function GroupsPanel() {
           toast.notify('Group saved.', 'success');
           await queryClient.invalidateQueries({ queryKey: ['groups'] });
         }}
+      />
+
+      <ConfirmDialog
+        open={Boolean(removeTarget)}
+        title={`Remove ${removeTarget?.name ?? 'group'}`}
+        message={
+          <>
+            The group and its {removeTarget?.member_count ?? 0} membership record(s) are removed. Candidate accounts,
+            classes and results are untouched. A group still assigned to a paper cannot be removed — those assignments
+            are the record of who was expected to sit it.
+          </>
+        }
+        confirmLabel="Remove group"
+        busy={remove.isPending}
+        onConfirm={() => removeTarget && remove.mutate(removeTarget.id)}
+        onCancel={() => setRemoveTarget(null)}
       />
     </>
   );

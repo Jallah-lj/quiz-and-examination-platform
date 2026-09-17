@@ -92,6 +92,7 @@ export default function QuizDetailPage() {
   const [startTarget, setStartTarget] = useState<StartAttemptTarget | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
   const [statusTarget, setStatusTarget] = useState<QuizStatus | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<QuizDetailResponse['assignments'][number] | null>(null);
 
   const detail = useQuery({
     queryKey: ['quiz', quizId],
@@ -130,10 +131,14 @@ export default function QuizDetailPage() {
   const unassign = useMutation({
     mutationFn: (assignmentId: number) => api.delete(`/quizzes/${quizId}/assignments/${assignmentId}`),
     onSuccess: async () => {
+      setRemoveTarget(null);
       toast.notify('Assignment removed.', 'success');
       await queryClient.invalidateQueries({ queryKey: ['quiz', quizId] });
     },
-    onError: (error) => toast.notify(error instanceof ApiError ? error.message : 'The assignment could not be removed.', 'error'),
+    onError: (error) => {
+      setRemoveTarget(null);
+      toast.notify(error instanceof ApiError ? error.message : 'The assignment could not be removed.', 'error');
+    },
   });
 
   if (detail.isLoading) return <p className="text-muted">Loading quiz…</p>;
@@ -263,7 +268,7 @@ export default function QuizDetailPage() {
                 align: 'right',
                 render: (row) =>
                   isOwnerOrAdmin ? (
-                    <Button size="sm" variant="ghost" onClick={() => unassign.mutate(row.id)}>
+                    <Button size="sm" variant="ghost" onClick={() => setRemoveTarget(row)}>
                       Remove
                     </Button>
                   ) : null,
@@ -375,6 +380,26 @@ export default function QuizDetailPage() {
         busy={changeStatus.isPending}
         onConfirm={() => statusTarget && changeStatus.mutate(statusTarget)}
         onCancel={() => setStatusTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(removeTarget)}
+        title="Remove this assignment"
+        message={
+          <>
+            {removeTarget?.class_name
+              ? `The candidates in ${removeTarget.class_name} will no longer see this quiz.`
+              : removeTarget?.group_name
+                ? `The candidates in ${removeTarget.group_name} will no longer see this quiz.`
+                : `${removeTarget?.student_name ?? 'This candidate'} will no longer see this quiz.`}{' '}
+            Attempts already started or submitted are preserved. An assignment cannot be removed once a candidate has
+            attempted the quiz.
+          </>
+        }
+        confirmLabel="Remove assignment"
+        busy={unassign.isPending}
+        onConfirm={() => removeTarget && unassign.mutate(removeTarget.id)}
+        onCancel={() => setRemoveTarget(null)}
       />
     </div>
   );
