@@ -76,7 +76,7 @@ export function startScheduler(db: Db, options: { intervalMs?: number; onRun?: (
             type: 'result_published',
             title: 'Result published',
             body: `Your result for "${result.paper}" has been released.`,
-            link: '/student/results',
+            link: '/results',
             severity: 'success',
             dedupeKey: `result_published:result:${result.id}`,
           });
@@ -127,7 +127,7 @@ export function startScheduler(db: Db, options: { intervalMs?: number; onRun?: (
             type: 'exam_reminder',
             title: 'Examination starting soon',
             body: `"${examRow.name}" opens on ${new Date(examRow.start_at).toUTCString()}.`,
-            link: '/student/examinations',
+            link: '/examinations',
             severity: 'warning',
             dedupeKey: `exam_reminder:${exam.id}`,
           });

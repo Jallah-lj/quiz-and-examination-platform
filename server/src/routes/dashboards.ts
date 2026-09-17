@@ -909,7 +909,7 @@ router.get(
             title: `${gradingBacklog.awaiting_results} submission(s) have no result recorded`,
             detail:
               'These submissions are in the queue but grading never produced a result row, so they are missing from every published figure. Finalise them in the grading queue.',
-            link: '/grading/queue',
+            link: '/grading',
           }
         : null,
       passMarkConflicts.length > 0

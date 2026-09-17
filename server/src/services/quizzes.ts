@@ -368,7 +368,7 @@ export function assignQuiz(
       type: 'quiz_assigned',
       title: 'New quiz available',
       body: `"${quiz.title}" is available until ${new Date(quiz.available_until).toUTCString()}.`,
-      link: '/student/quizzes',
+      link: '/quizzes',
       severity: 'info',
       dedupeKey: `quiz_assigned:${quizId}`,
     });
@@ -418,7 +418,7 @@ export function publishQuizResults(
         type: 'result_published',
         title: 'Quiz result published',
         body: `Your result for "${quiz.title}" has been released.`,
-        link: '/student/results',
+        link: '/results',
         severity: 'success',
         dedupeKey: `result_published:quiz:${quizId}:${student.student_id}`,
       });

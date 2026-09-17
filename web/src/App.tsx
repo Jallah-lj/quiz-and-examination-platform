@@ -216,7 +216,9 @@ export default function App() {
           <Route
             path="/examinations"
             element={
-              <RequirePermission permissions={['exam.view', 'exam.create']}>
+              // Candidates hold attempt.take rather than exam.view; the page renders their
+              // own available, upcoming and completed papers for that role.
+              <RequirePermission permissions={['exam.view', 'exam.create', 'attempt.take']}>
                 <ExamsPage />
               </RequirePermission>
             }

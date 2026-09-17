@@ -473,7 +473,7 @@ export function publishExamResults(
         type: 'result_published',
         title: 'Result published',
         body: `Your result for "${student.paper}" has been released.`,
-        link: '/student/results',
+        link: '/results',
         severity: 'success',
         dedupeKey: `result_published:exam:${examId}:${student.student_id}`,
       });
@@ -570,7 +570,7 @@ export function assignExam(
       type: 'exam_assigned',
       title: 'New examination assigned',
       body: `"${exam.name}" is scheduled for ${new Date(exam.start_at).toUTCString()}.`,
-      link: '/student/examinations',
+      link: '/examinations',
       severity: 'info',
       dedupeKey: `exam_assigned:${examId}`,
     });
@@ -683,7 +683,7 @@ export function publishAttemptResults(
               type: 'result_published',
               title: 'Your result has been published',
               body: `The result for "${paper}" is now available on your dashboard.`,
-              link: '/student/results',
+              link: '/results',
               severity: 'success',
               dedupeKey: `result_published:attempt:${attemptId}`,
             });

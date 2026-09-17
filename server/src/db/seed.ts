@@ -646,8 +646,8 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
 
   // --------------------------------------------------------------- notifications
   const notificationSeeds = [
-    { type: 'exam_assigned', title: 'New examination assigned', body: 'Midterm Examination — Data Structures & Algorithms is now open.', link: '/student/examinations' },
-    { type: 'result_published', title: 'Result published', body: 'Your Statistics Continuous Assessment result is available.', link: '/student/results' },
+    { type: 'exam_assigned', title: 'New examination assigned', body: 'Midterm Examination — Data Structures & Algorithms is now open.', link: '/examinations' },
+    { type: 'result_published', title: 'Result published', body: 'Your Statistics Continuous Assessment result is available.', link: '/results' },
   ];
   for (const student of students.slice(0, 12)) {
     for (const notification of notificationSeeds) {

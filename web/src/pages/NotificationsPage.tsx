@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatDateTime, formatRelative, titleCase } from '../lib/format';
+import { knownLink } from '../lib/links';
 import { useListState } from '../lib/hooks';
 import { useAuth } from '../context/AuthContext';
 import type { NotificationRow } from '../types';
@@ -91,7 +92,11 @@ export default function NotificationsPage() {
           </div>
         ) : (
           <ul className="notification-page-list">
-            {rows.map((row) => (
+            {rows.map((row) => {
+              // Stored links can outlive the route they pointed at, so only offer a link
+              // the app can actually open.
+              const openLink = knownLink(row.link);
+              return (
               <li key={row.id} className={row.read_at ? '' : 'notification-page-list__unread'}>
                 <button
                   type="button"
@@ -113,12 +118,12 @@ export default function NotificationsPage() {
                 {openId === row.id ? (
                   <div className="notification-page-list__body">
                     {row.body ? <p>{row.body}</p> : <p className="text-muted">No further detail was recorded.</p>}
-                    {row.link ? (
+                    {openLink ? (
                       <Button
                         size="sm"
                         variant="primary"
                         onClick={() => {
-                          navigate(row.link ?? '/dashboard');
+                          navigate(openLink);
                         }}
                       >
                         Open
@@ -127,7 +132,8 @@ export default function NotificationsPage() {
                   </div>
                 ) : null}
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
 
