@@ -401,7 +401,7 @@ function SubjectAssignmentModal({ teacher, onClose }: { teacher: Teacher | null;
   }, [teacherId, detail.isSuccess, detail.data]);
 
   const save = useMutation({
-    mutationFn: () => api.post(`/teachers/${teacher?.id}/subjects`, { subjectIds: selected }),
+    mutationFn: () => api.put(`/teachers/${teacher?.id}/subjects`, { subjectIds: selected }),
     onSuccess: async () => {
       toast.notify('Subject assignments updated.', 'success');
       await queryClient.invalidateQueries({ queryKey: ['teachers'] });

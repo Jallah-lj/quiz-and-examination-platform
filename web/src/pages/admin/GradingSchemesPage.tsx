@@ -243,7 +243,7 @@ function SchemeModal({
           remark: band.remark.trim() || null,
         })),
       };
-      return isNew ? api.post('/grading-schemes', payload) : api.patch(`/grading-schemes/${scheme?.id}`, payload);
+      return isNew ? api.post('/grading-schemes', payload) : api.put(`/grading-schemes/${scheme?.id}`, payload);
     },
     onSuccess: onSaved,
     onError: (caught) => setError(caught instanceof ApiError ? caught.message : 'The scheme could not be saved.'),

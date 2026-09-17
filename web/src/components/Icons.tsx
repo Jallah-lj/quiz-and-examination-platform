@@ -102,6 +102,15 @@ export const IconEye = (p: IconProps) => (
   <Base {...p}><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z" /><circle cx="12" cy="12" r="2.6" /></Base>
 );
 export const IconMenu = (p: IconProps) => (<Base {...p}><path d="M4 7h16M4 12h16M4 17h16" /></Base>);
+export const IconSun = (p: IconProps) => (
+  <Base {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+  </Base>
+);
+export const IconMoon = (p: IconProps) => (
+  <Base {...p}><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" /></Base>
+);
 export const IconShield = (p: IconProps) => (
   <Base {...p}><path d="M12 3l7 3v6c0 4.4-3 8-7 9-4-1-7-4.6-7-9V6z" /><path d="M9.5 12l1.8 1.8 3.4-3.4" /></Base>
 );

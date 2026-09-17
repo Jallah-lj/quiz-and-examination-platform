@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
+
 import { api } from '../lib/api';
 import { formatRelative, initials } from '../lib/format';
 import { useScrollLock } from '../lib/hooks';
 import type { NotificationRow, RoleCode } from '../types';
 import { Button, Loading, useToast } from './ui';
+import { ThemeOptions, ThemeToggleButton } from './ThemeToggle';
 import {
   IconAudit,
   IconBank,
@@ -219,6 +221,8 @@ export function AppLayout() {
 
           <div className="topbar__spacer" />
 
+          <ThemeToggleButton />
+
           <div className="topbar__item" ref={notificationRef}>
             <button
               type="button"
@@ -238,6 +242,9 @@ export function AppLayout() {
               type="button"
               className="account-button"
               aria-expanded={accountOpen}
+              // The name is visible on wide screens and inside the menu on phones, so the
+              // button always carries its own label.
+              aria-label={`Account menu for ${user.fullName}`}
               onClick={() => setAccountOpen((open) => !open)}
             >
               <span className="avatar" aria-hidden="true">
@@ -274,17 +281,7 @@ export function AppLayout() {
                 >
                   Notifications
                 </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="menu-popover__danger"
-                  onClick={() => {
-                    setAccountOpen(false);
-                    void logout().then(() => navigate('/login'));
-                  }}
-                >
-                  Sign out
-                </button>
+                <ThemeOptions />
               </div>
             ) : null}
           </div>

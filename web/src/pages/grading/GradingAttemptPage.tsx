@@ -57,7 +57,7 @@ export default function GradingAttemptPage() {
 
   const saveGrade = useMutation({
     mutationFn: ({ answerId, awardedMarks, comment }: { answerId: number; awardedMarks: number; comment: string | null }) =>
-      api.patch(`/grading/attempts/${attemptId}/answers/${answerId}`, { awardedMarks, comment }),
+      api.post(`/grading/attempts/${attemptId}/answers/${answerId}`, { awardedMarks, comment }),
     onSuccess: async (_result, variables) => {
       toast.notify('Marks saved.', 'success');
       setErrors((current) => ({ ...current, [variables.answerId]: '' }));

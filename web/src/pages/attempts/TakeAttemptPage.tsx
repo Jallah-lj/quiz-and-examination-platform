@@ -318,6 +318,9 @@ export default function TakeAttemptPage() {
   const currentAnswer = current ? answers[String(current.questionId)] : undefined;
   const savingCurrent = current ? saving[String(current.questionId)] : false;
   const timerClass = remaining !== null && remaining <= 60 ? 'danger' : remaining !== null && remaining <= 300 ? 'warning' : '';
+  // Stated in words as well as colour, so an urgent timer is never colour-only.
+  const timerUrgency =
+    remaining === null ? '' : remaining <= 60 ? 'under 1 min' : remaining <= 300 ? 'under 5 min' : '';
 
   if (submitted) {
     return (
@@ -387,10 +390,21 @@ export default function TakeAttemptPage() {
         </div>
 
         <div className="exam-header__status">
-          <span className={`exam-timer ${timerClass ? `exam-timer--${timerClass}` : ''}`} role="timer" aria-live="off">
+          <span
+            className={`exam-timer ${timerClass ? `exam-timer--${timerClass}` : ''}`}
+            role="timer"
+            aria-live="off"
+            aria-label={
+              remaining === null
+                ? 'Time remaining unavailable'
+                : `Time remaining ${formatCountdown(remaining)}${timerUrgency ? `, ${timerUrgency}` : ''}`
+            }
+          >
             <IconClock size={17} />
             <span className="exam-timer__value">{remaining === null ? '--:--' : formatCountdown(remaining)}</span>
-            <span className="exam-timer__label">remaining</span>
+            <span className="exam-timer__label">
+              remaining{timerUrgency ? <> {'\u00b7'} <span className="exam-timer__urgency">{timerUrgency}</span></> : null}
+            </span>
           </span>
           <span
             className={`connection-chip ${connection === 'offline' ? 'connection-chip--offline' : ''}`}

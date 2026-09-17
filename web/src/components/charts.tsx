@@ -17,14 +17,16 @@ export interface SeriesPoint {
   detail?: string;
 }
 
-const TONES: Record<string, string> = {
-  default: '#2f5d8a',
-  accent: '#0f766e',
-  success: '#1f7a4d',
-  warning: '#a16207',
-  danger: '#b42318',
-  neutral: '#5b6b7c',
-};
+/**
+ * Tone names map to classes rather than hex values, so every series is painted from the
+ * theme tokens and switches cleanly between the light and dark palettes.
+ */
+const TONES = ['default', 'accent', 'success', 'warning', 'danger', 'neutral'] as const;
+type Tone = (typeof TONES)[number];
+
+function toneName(tone?: string): Tone {
+  return (TONES as readonly string[]).includes(tone ?? '') ? (tone as Tone) : 'default';
+}
 
 /**
  * Indexes that get an axis label: roughly `target` evenly spaced ticks anchored on the
@@ -124,11 +126,8 @@ export function BarChart({
               {valueSuffix}
             </span>
             <span
-              className="chart__bar"
-              style={{
-                height: `${Math.max(2, (point.value / max) * plotHeight)}px`,
-                background: TONES[point.tone ?? 'default'] ?? TONES.default,
-              }}
+              className={`chart__bar chart__bar--${toneName(point.tone)}`}
+              style={{ height: `${Math.max(2, (point.value / max) * plotHeight)}px` }}
             />
             <span className={`chart__label ${ticks.has(index) ? '' : 'chart__label--hidden'}`} aria-hidden={!ticks.has(index)}>
               {ticks.has(index) ? point.label : data[0].label}
@@ -203,17 +202,17 @@ export function LineChart({
               y1={scale(value)}
               x2={width - padding.right}
               y2={scale(value)}
-              stroke={value === 0 ? '#c6d2dd' : '#e7edf3'}
+              className={value === 0 ? 'chart__grid-line--base' : 'chart__grid-line'}
             />
             <text x={padding.left - 8} y={scale(value) + 4} textAnchor="end" className="chart__axis">
               {value}
             </text>
           </g>
         ))}
-        <path d={area} fill="rgba(47, 93, 138, 0.10)" stroke="none" />
-        <path d={path} fill="none" stroke="#2f5d8a" strokeWidth={2} />
+        <path d={area} className="chart__area" />
+        <path d={path} className="chart__line" />
         {points.map((point) => (
-          <circle key={point.label} cx={point.x} cy={point.y} r={3.5} fill="#2f5d8a">
+          <circle key={point.label} cx={point.x} cy={point.y} r={3.5} className="chart__dot">
             <title>{`${point.detail ?? point.label}: ${point.value}${valueSuffix}`}</title>
           </circle>
         ))}
@@ -269,11 +268,11 @@ export function DonutChart({
             const circle = (
               <circle
                 key={point.label}
+                className={`chart__segment--${toneName(point.tone)}`}
                 cx={size / 2}
                 cy={size / 2}
                 r={radius}
                 fill="none"
-                stroke={TONES[point.tone ?? 'default'] ?? TONES.default}
                 strokeWidth={16}
                 strokeDasharray={`${dash} ${circumference - dash}`}
                 strokeDashoffset={-offset}
@@ -293,11 +292,7 @@ export function DonutChart({
       <ul className="chart__legend">
         {data.map((point) => (
           <li key={point.label}>
-            <span
-              className="chart__swatch"
-              style={{ background: TONES[point.tone ?? 'default'] ?? TONES.default }}
-              aria-hidden="true"
-            />
+            <span className={`chart__swatch chart__swatch--${toneName(point.tone)}`} aria-hidden="true" />
             <span className="chart__legend-label">{point.label}</span>
             <span className="chart__legend-value">
               {point.value} ({Math.round((point.value / total) * 100)}%)

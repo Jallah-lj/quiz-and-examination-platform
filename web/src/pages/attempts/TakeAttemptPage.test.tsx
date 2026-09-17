@@ -284,6 +284,29 @@ describe('TakeAttemptPage', () => {
     expect(calls.some((call) => call.url.endsWith('/submit'))).toBe(false);
   });
 
+  it('states the remaining time in words, not only in colour, when the deadline nears', async () => {
+    // "under 5 min" is the amber state; the label must say so even if colour is unavailable.
+    installFetch(paper({ remainingSeconds: 90, serverTime: new Date().toISOString() }));
+    renderPage();
+
+    const timer = await screen.findByRole('timer');
+    expect(within(timer).getByText(/^remaining/)).toBeInTheDocument();
+    expect(within(timer).getByText('under 5 min')).toBeInTheDocument();
+    expect(timer.className).toContain('exam-timer--warning');
+    expect(timer).toHaveAttribute('aria-label', expect.stringContaining('under 5 min'));
+  });
+
+  it('marks the final minute as the danger state', async () => {
+    installFetch(paper({ remainingSeconds: 45, serverTime: new Date().toISOString() }));
+    renderPage();
+
+    const timer = await screen.findByRole('timer');
+    expect(within(timer).getByText('under 1 min')).toBeInTheDocument();
+    expect(timer.className).toContain('exam-timer--danger');
+    // The wording is accurate: the countdown itself is under a minute.
+    expect(timer.textContent).toMatch(/00:4\d/);
+  });
+
   it('auto-submits with the time_expired reason when the server clock reaches zero', async () => {
     const expired = paper({ remainingSeconds: 1, serverTime: new Date().toISOString() });
     const calls = installFetch(expired);

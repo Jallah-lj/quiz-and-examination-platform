@@ -4,11 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content="ExamSys — quiz and examination management platform for schools, universities and certification bodies." />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <title>ExamSys — Examination Management</title>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Resolve the stored appearance before the first paint so a reload never flashes the
+      // wrong palette. ThemeProvider keeps this in sync once React has mounted.
+      (function () {
+        try {
+          var stored = window.localStorage.getItem('examsys.theme');
+          var preference = stored === 'light' || stored === 'dark' ? stored : 'system';
+          var prefersDark =
+            preference === 'system' &&
+            typeof window.matchMedia === 'function' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var theme = preference === 'system' ? (prefersDark ? 'dark' : 'light') : preference;
+          document.documentElement.setAttribute('data-theme', theme);
+          document.documentElement.style.colorScheme = theme;
+        } catch (error) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
