@@ -106,15 +106,17 @@ export function BarChart({
 
   const max = Math.max(...data.map((point) => point.value), 1);
   // How many labels and numbers the card actually has room for, rather than a fixed guess:
-  // a date needs about 56px of column, a count about 26px.
+  // a date needs about 56px of column, a count about 26px. A phone card also gets a
+  // shorter plot so the panel does not push everything below the fold.
   const capacity = Math.max(3, Math.min(7, Math.floor(width / 56)));
   const inlineValues = width / data.length >= 26;
   const ticks = new Set(axisTickIndexes(data.length, labelTarget ?? capacity));
-  const plotHeight = height - (inlineValues ? 34 : 18);
+  const plot = width < 460 ? Math.min(height, 148) : height;
+  const plotHeight = plot - (inlineValues ? 34 : 18);
 
   return (
     <figure className="chart" ref={container}>
-      <div className="chart__bars" style={{ height }} role="img" aria-label={ariaLabel}>
+      <div className="chart__bars" style={{ height: plot }} role="img" aria-label={ariaLabel}>
         {data.map((point, index) => (
           <div
             key={point.label}
@@ -251,17 +253,31 @@ export function DonutChart({
   ariaLabel: string;
   size?: number;
 }) {
+  // Measured before the empty-state return so the hook order never changes.
+  const [container, width] = useMeasuredWidth<HTMLElement>(520);
   const total = data.reduce((sum, point) => sum + point.value, 0);
   if (!total) return <p className="chart-empty">No data recorded yet.</p>;
 
-  const radius = size / 2 - 14;
+  /*
+   * The ring keeps its proportions but follows the column it sits in: it shrinks on a
+   * narrow card and is capped on a wide one, so the legend always has room beside it.
+   */
+  const diameter = Math.max(132, Math.min(size, Math.round(width * 0.46)));
+  const radius = diameter / 2 - 14;
   const circumference = 2 * Math.PI * radius;
   let offset = 0;
 
   return (
-    <figure className="chart chart--donut">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={ariaLabel}>
-        <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
+    <figure className="chart chart--donut" ref={container}>
+      <svg
+        className="chart__donut"
+        width={diameter}
+        height={diameter}
+        viewBox={`0 0 ${diameter} ${diameter}`}
+        role="img"
+        aria-label={ariaLabel}
+      >
+        <g transform={`rotate(-90 ${diameter / 2} ${diameter / 2})`}>
           {data.map((point) => {
             const fraction = point.value / total;
             const dash = fraction * circumference;
@@ -269,8 +285,8 @@ export function DonutChart({
               <circle
                 key={point.label}
                 className={`chart__segment--${toneName(point.tone)}`}
-                cx={size / 2}
-                cy={size / 2}
+                cx={diameter / 2}
+                cy={diameter / 2}
                 r={radius}
                 fill="none"
                 strokeWidth={16}

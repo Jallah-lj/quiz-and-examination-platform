@@ -1,6 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import { BarChart, LineChart, axisTickIndexes } from './charts';
+import { BarChart, DonutChart, LineChart, axisTickIndexes } from './charts';
+
+/** Pretend the panel is a given number of CSS pixels wide, as a real layout would. */
+function withPanelWidth(width: number) {
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+    width,
+    height: 200,
+    top: 0,
+    left: 0,
+    right: width,
+    bottom: 200,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  } as DOMRect);
+}
 
 /** Thirty days, as the administrator and platform dashboards send them. */
 function dailySeries(count = 30) {
@@ -166,5 +181,60 @@ describe('LineChart', () => {
   it('refuses to draw a trend from a single point', () => {
     render(<LineChart ariaLabel="Score progression" data={[{ label: '09-01', value: 42 }]} />);
     expect(screen.getByText('Not enough released results to draw a trend yet.')).toBeInTheDocument();
+  });
+});
+
+describe('chart panels fit the space they are given', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const grades = [
+    { label: 'A', value: 4, tone: 'success' },
+    { label: 'B', value: 6 },
+    { label: 'F', value: 2, tone: 'danger' },
+  ];
+
+  it('scales the distribution ring with its column and caps it on a wide card', () => {
+    withPanelWidth(300);
+    const narrow = render(<DonutChart ariaLabel="Grades" data={grades} />);
+    const narrowSize = Number(narrow.container.querySelector('svg')?.getAttribute('width'));
+    narrow.unmount();
+
+    withPanelWidth(1200);
+    const wide = render(<DonutChart ariaLabel="Grades" data={grades} />);
+    const wideSize = Number(wide.container.querySelector('svg')?.getAttribute('width'));
+
+    expect(narrowSize).toBeLessThan(wideSize);
+    expect(narrowSize).toBeGreaterThanOrEqual(132);
+    // Never larger than the default, however wide the card gets.
+    expect(wideSize).toBe(168);
+    // The viewBox follows the diameter, so the ring keeps its proportions.
+    expect(wide.container.querySelector('svg')?.getAttribute('viewBox')).toBe(`0 0 ${wideSize} ${wideSize}`);
+  });
+
+  it('shortens the column plot on a phone-width card', () => {
+    withPanelWidth(340);
+    const phone = render(<BarChart ariaLabel="Submissions" data={dailySeries(30)} />);
+    const phoneHeight = (phone.container.querySelector('.chart__bars') as HTMLElement).style.height;
+    phone.unmount();
+
+    withPanelWidth(900);
+    const desktop = render(<BarChart ariaLabel="Submissions" data={dailySeries(30)} />);
+    const desktopHeight = (desktop.container.querySelector('.chart__bars') as HTMLElement).style.height;
+
+    expect(phoneHeight).toBe('148px');
+    expect(desktopHeight).toBe('180px');
+  });
+
+  it('keeps a phone-width series labelled rather than dropping the axis', () => {
+    withPanelWidth(340);
+    render(<BarChart ariaLabel="Submissions per day" unit="submissions" data={dailySeries(30)} />);
+    const labels = Array.from(screen.getByRole('img', { name: 'Submissions per day' }).querySelectorAll('.chart__label')).filter(
+      (node) => !node.classList.contains('chart__label--hidden'),
+    );
+    expect(labels.length).toBeGreaterThanOrEqual(3);
+    expect(labels.length).toBeLessThanOrEqual(7);
+    expect(labels[labels.length - 1].textContent).toBe('08-30');
   });
 });

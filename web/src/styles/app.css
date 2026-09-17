@@ -72,6 +72,9 @@
   --toast-bg: #101a26;
   --toast-text: #ffffff;
 
+  /* Overlays sit on top of the app, so they are tokenised like any other surface. */
+  --scrim: rgba(16, 26, 38, 0.5);
+
   /* Charts read from these so a theme switch repaints them too. */
   --chart-line: #2f5d8a;
   --chart-area: rgba(47, 93, 138, 0.1);
@@ -88,80 +91,85 @@
 /*
  * Dark theme.
  *
- * The palette is inverted rather than re-coloured: the same navy accent, the same
- * semantic status colours, and flat surfaces with 1px borders. Only the tokens change,
- * so every component follows automatically. Applied by the pre-paint script in
- * index.html, which resolves "system" before the first paint.
+ * Surfaces are true black and the neutrals are genuinely neutral: no blue cast anywhere
+ * in the background, borders, text ramp or chrome. The navy stays as an accent only —
+ * buttons, links, focus rings, active markers and chart series — never as a wash across
+ * a panel. Only the tokens change, so every component follows automatically. Applied by
+ * the pre-paint script in index.html, which resolves "system" before the first paint.
  */
 [data-theme='dark'] {
   color-scheme: dark;
 
-  --ink-900: #eef3f8;
-  --ink-800: #dfe7ef;
-  --ink-700: #c8d3de;
-  --ink-600: #adbccb;
-  --ink-500: #93a3b4;
-  --ink-400: #7d8d9e;
-  --ink-300: #64748b;
-  --ink-200: #414f5d;
-  --ink-100: #2c3946;
-  --ink-50: #1d2731;
+  /* Neutral text ramp: equal channels, so nothing reads as blue. */
+  --ink-900: #f5f5f5;
+  --ink-800: #e6e6e6;
+  --ink-700: #d4d4d4;
+  --ink-600: #bcbcbc;
+  --ink-500: #a3a3a3;
+  --ink-400: #8a8a8a;
+  --ink-300: #6f6f6f;
+  --ink-200: #4a4a4a;
+  --ink-100: #2f2f2f;
+  --ink-50: #1f1f1f;
 
-  --navy-900: #070f16;
-  --navy-800: #123246;
+  /* Chrome is pure black; the navy survives as an accent, not as a surface. */
+  --navy-900: #000000;
+  --navy-800: #215a7d;
   --navy-700: #2c759f;
-  --navy-600: #5aa2cc;
+  --navy-600: #63a6cc;
   --navy-500: #4f9dcb;
-  --navy-100: #1a2f3d;
+  --navy-100: #1e1e1e;
 
-  --green-700: #6ed3a4;
+  --green-700: #74d6a8;
   --green-600: #4fbb8b;
-  --green-100: #13322a;
-  --amber-700: #e2b163;
+  --green-100: #12211a;
+  --amber-700: #e6b968;
   --amber-600: #cf9a3f;
-  --amber-100: #33290f;
+  --amber-100: #241d0e;
   --red-700: #f0a1a1;
   --red-600: #dc8181;
-  --red-100: #3a1e1e;
-  --slate-100: #232f3b;
+  --red-100: #2a1616;
+  --slate-100: #232323;
 
-  --surface: #171f28;
-  --surface-sunken: #10171e;
-  --border: #2d3a47;
-  --border-strong: #43525f;
+  --surface: #0b0b0b;
+  --surface-sunken: #000000;
+  --border: #262626;
+  --border-strong: #3d3d3d;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 14px 34px rgba(0, 0, 0, 0.55);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.7);
 
-  --focus-ring: 0 0 0 3px rgba(79, 157, 203, 0.45);
+  --focus-ring: 0 0 0 3px rgba(79, 157, 203, 0.5);
 
-  --tint-info: #16242f;
-  --tint-success: #142720;
-  --tint-warning: #2a2314;
-  --tint-danger: #2a1c1c;
-  --tint-selected: #1a2f3d;
-  --tint-hover: rgba(255, 255, 255, 0.05);
-  --badge-info-border: #2c4a5e;
-  --badge-success-border: #23503f;
-  --badge-warning-border: #4d3f1c;
-  --badge-danger-border: #4d2b2b;
+  --tint-info: #111111;
+  --tint-success: #0d1512;
+  --tint-warning: #15110b;
+  --tint-danger: #171010;
+  --tint-selected: #1a1a1a;
+  --tint-hover: rgba(255, 255, 255, 0.06);
+  --badge-info-border: #3a3a3a;
+  --badge-success-border: #24503d;
+  --badge-warning-border: #4a3d1c;
+  --badge-danger-border: #4a2626;
 
-  --accent-text: #86c5e8;
+  --accent-text: #8ec9ea;
   --accent-contrast: #ffffff;
-  --toast-bg: #2c3946;
-  --toast-text: #eef3f8;
+  --toast-bg: #1c1c1c;
+  --toast-text: #f5f5f5;
 
-  --chart-line: #6fb3dd;
-  --chart-area: rgba(111, 179, 221, 0.14);
-  --chart-grid: #26323d;
-  --chart-grid-strong: #384753;
-  --chart-1: #6fb3dd;
+  --chart-line: #7fbde2;
+  --chart-area: rgba(127, 189, 226, 0.14);
+  --chart-grid: #242424;
+  --chart-grid-strong: #383838;
+  --chart-1: #7fbde2;
   --chart-2: #45b4a4;
   --chart-3: #5cc08d;
   --chart-4: #d8a53f;
   --chart-5: #e07070;
-  --chart-6: #93a3b4;
+  --chart-6: #a3a3a3;
+
+  --scrim: rgba(0, 0, 0, 0.66);
 }
 
 *,
@@ -794,7 +802,7 @@ table.data-table {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(16, 26, 38, 0.5);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1152,7 +1160,7 @@ table.data-table {
   outline: 2px solid var(--navy-700);
   outline-offset: 1px;
   background: var(--navy-100);
-  color: var(--navy-800);
+  color: var(--accent-text);
 }
 .exam-legend { display: grid; gap: 0.35rem; font-size: 0.78rem; color: var(--ink-600); margin-bottom: 1rem; }
 .exam-legend__row { display: flex; align-items: center; gap: 0.45rem; }
@@ -1412,7 +1420,7 @@ table.data-table {
 .scrim {
   position: fixed;
   inset: 0;
-  background: rgba(16, 26, 38, 0.45);
+  background: var(--scrim);
   border: 0;
   padding: 0;
   z-index: 80;
@@ -1597,6 +1605,39 @@ table.data-table {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
   align-items: start;
+  margin-bottom: 1.1rem;
+}
+
+/*
+ * The dashboard's two chart panels. The daily series carries thirty columns and needs
+ * roughly twice the width of the distribution ring, and both cards are stretched to a
+ * common height so the pair reads as a single band. They stack as soon as the two
+ * columns would be too narrow to read.
+ */
+.dashboard-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+  margin-bottom: 1.1rem;
+}
+.dashboard-charts > .card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.dashboard-charts > .card > .card__body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+/*
+ * Below this the pair cannot hold a readable thirty-column series beside the
+ * distribution ring (the grades panel falls under ~320px), so it becomes two rows.
+ */
+@media (max-width: 1080px) {
+  .dashboard-charts { grid-template-columns: minmax(0, 1fr); }
 }
 
 .stat-grid {
@@ -1955,7 +1996,7 @@ table.data-table {
   place-items: center;
   border-radius: 50%;
   background: var(--navy-100);
-  color: var(--navy-700);
+  color: var(--accent-text);
   font-size: 0.74rem;
   font-weight: 700;
 }
@@ -2082,7 +2123,7 @@ table.data-table {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--navy-700);
+  color: var(--accent-text);
   border: 1px solid var(--navy-100);
   background: var(--navy-100);
   border-radius: 10px;
@@ -2237,7 +2278,18 @@ table.data-table {
 .grading-item__marking .field:last-of-type { flex: 1 1 240px; }
 
 /* -------------------------------------------------------------------- charts */
-.chart--donut { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; }
+/*
+ * The ring is sized by the component to fit this column; CSS only decides whether the
+ * legend sits beside it or below it.
+ */
+.chart--donut {
+  display: grid;
+  grid-template-columns: auto minmax(0, 320px);
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+.chart__donut { display: block; flex: 0 0 auto; }
 .chart-empty { color: var(--ink-500); font-size: 0.86rem; padding: 1.2rem 0; text-align: center; }
 .chart__bars { display: flex; align-items: flex-end; gap: 0.25rem; padding: 0.5rem 0 0; border-bottom: 1px solid var(--border); }
 .chart__column { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; min-width: 0; }
@@ -2289,11 +2341,17 @@ table.data-table {
 .chart__svg { width: 100%; height: auto; display: block; }
 .chart__axis { font-size: 0.68rem; fill: var(--ink-500); }
 .chart__donut-value { font-size: 1.4rem; font-weight: 600; fill: var(--ink-900); }
-.chart__legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; flex: 1 1 200px; }
-.chart__legend li { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+.chart__legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; min-width: 0; }
+.chart__legend li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
 .chart__swatch { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; }
-.chart__legend-label { flex: 1; color: var(--ink-600); }
-.chart__legend-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+.chart__legend-label { min-width: 0; overflow-wrap: anywhere; color: var(--ink-600); }
+.chart__legend-value { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* --------------------------------------------------- notifications full page */
 .notification-page-list { list-style: none; margin: 0; padding: 0; }
@@ -2550,6 +2608,8 @@ table.data-table {
   .metric-list__bar { width: 56px; }
   .chart__bars { gap: 0.15rem; }
   .chart__column { gap: 0.15rem; }
+  .chart--donut { grid-template-columns: minmax(0, 1fr); justify-items: center; }
+  .chart--donut .chart__legend { width: 100%; }
   .pipeline { gap: 0.35rem; }
   .pipeline__stage { padding: 0.5rem 0.25rem; }
   .check-list__item { padding: 0.5rem 0.85rem; }

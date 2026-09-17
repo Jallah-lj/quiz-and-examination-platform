@@ -150,3 +150,54 @@ describe('examination timer states', () => {
     expect(component).toMatch(/under 1 min|under 5 min/);
   });
 });
+
+describe('dark palette is black, not blue', () => {
+  /*
+   * The dark theme asked for true black: surfaces, borders, chrome and the text ramp
+   * must be neutral, so blue only ever appears as an accent (buttons, links, series).
+   */
+  const NEUTRAL = [
+    '--surface',
+    '--surface-sunken',
+    '--border',
+    '--border-strong',
+    '--ink-50',
+    '--ink-100',
+    '--ink-200',
+    '--ink-300',
+    '--ink-400',
+    '--ink-500',
+    '--ink-600',
+    '--ink-700',
+    '--ink-800',
+    '--ink-900',
+    '--slate-100',
+    '--navy-900',
+    '--navy-100',
+    '--toast-bg',
+    '--chart-grid',
+    '--chart-grid-strong',
+  ];
+
+  it('keeps every neutral token free of a colour cast', () => {
+    const tinted = NEUTRAL.filter((token) => {
+      const [r, g, b] = toRgb(dark[token]);
+      return Math.abs(b - r) > 3 || Math.abs(b - g) > 3;
+    });
+    expect(tinted, `these dark tokens still lean blue: ${tinted.join(', ')}`).toEqual([]);
+  });
+
+  it('paints the page and the chrome with true black', () => {
+    expect(dark['--surface-sunken']).toBe('#000000');
+    expect(dark['--navy-900']).toBe('#000000');
+    // The card surface stays a hair off black so it reads as a separate panel.
+    expect(relativeLuminance(dark['--surface'])).toBeLessThanOrEqual(0.01);
+    expect(dark['--surface']).not.toBe(dark['--surface-sunken']);
+  });
+
+  it('keeps the navy as an accent, never as a panel wash', () => {
+    // Accent tokens are allowed to be blue, and must remain readable on black.
+    expect(contrast(dark['--accent-text'], dark['--surface'])).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(dark['--accent-contrast'], dark['--navy-700'])).toBeGreaterThanOrEqual(4.5);
+  });
+});

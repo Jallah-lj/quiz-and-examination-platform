@@ -115,8 +115,13 @@ export function InstitutionDashboardView({
         />
       </div>
 
-      <div className="split-2">
-        <Card title="Submissions over time" description="Attempts submitted each day over the last 30 days.">
+      {/* The daily series carries thirty values, so it takes the wider half of the pair. */}
+      <div className="dashboard-charts">
+        <Card
+          className="card--chart"
+          title="Submissions over time"
+          description="Attempts submitted each day over the last 30 days."
+        >
           <BarChart
             ariaLabel="Submissions per day over the last thirty days"
             unit="submissions"
@@ -127,7 +132,11 @@ export function InstitutionDashboardView({
             }))}
           />
         </Card>
-        <Card title="Grade distribution" description="Released results grouped by awarded grade.">
+        <Card
+          className="card--chart"
+          title="Grade distribution"
+          description="Released results grouped by awarded grade."
+        >
           <DonutChart
             ariaLabel="Grade distribution across released results"
             data={data.gradeDistribution.map((point) => ({

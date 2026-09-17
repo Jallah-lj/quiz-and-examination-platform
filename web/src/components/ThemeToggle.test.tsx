@@ -135,6 +135,8 @@ describe('responsive rules', () => {
       '.account-button__text',
       '.metric-list__bar',
       'table.data-table.responsive',
+      '.dashboard-charts',
+      '.chart--donut',
     ];
     const mediaBlocks = Array.from(css.matchAll(/@media\s*\(max-width:\s*(\d+)px\)\s*\{([\s\S]*?)\n\}/g));
     expect(mediaBlocks.length).toBeGreaterThan(4);
@@ -142,6 +144,26 @@ describe('responsive rules', () => {
     const mobileCss = mediaBlocks.filter((block) => Number(block[1]) <= 1180).map((block) => block[2]).join('\n');
     const uncovered = required.filter((selector) => !mobileCss.includes(selector));
     expect(uncovered).toEqual([]);
+  });
+
+  it('pairs the two dashboard chart panels without letting either one squeeze', () => {
+    const band = css.match(/\.dashboard-charts \{([\s\S]*?)\n\}/);
+    expect(band, 'the dashboard chart band has no layout rule').not.toBeNull();
+    // The thirty-column series gets the wider column of the pair.
+    const columns = band![1].match(/grid-template-columns: minmax\(0, ([\d.]+)fr\) minmax\(0, ([\d.]+)fr\)/);
+    expect(columns, 'the chart band is not a two-column proportional grid').not.toBeNull();
+    expect(Number(columns![1])).toBeGreaterThan(Number(columns![2]));
+    // Both cards stretch to a common height and stack their chart against the baseline.
+    expect(css).toMatch(/\.dashboard-charts > \.card \{[^}]*display: flex/);
+    expect(css).toMatch(/\.dashboard-charts > \.card > \.card__body \{[^}]*justify-content: flex-end/);
+    // The band collapses to one column, and the ring stacks above its legend on a phone.
+    const stack = css.match(/@media \(max-width: (\d+)px\) \{\s*(?:\/\*[\s\S]*?\*\/\s*)?\.dashboard-charts \{ grid-template-columns: minmax\(0, 1fr\); \}/);
+    expect(stack, 'the chart band never collapses to a single column').not.toBeNull();
+    // It must collapse before the grades column becomes too narrow for the ring.
+    expect(Number(stack![1])).toBeGreaterThanOrEqual(960);
+    expect(Number(stack![1])).toBeLessThanOrEqual(1180);
+    const phone = css.match(/@media \(max-width: 520px\) \{([\s\S]*?)\n\}/);
+    expect(phone![1]).toContain('.chart--donut { grid-template-columns: minmax(0, 1fr);');
   });
 
   it('has a phone breakpoint that trims the topbar and full-width controls', () => {
