@@ -172,6 +172,31 @@
   --scrim: rgba(0, 0, 0, 0.66);
 }
 
+/*
+ * The sidebar, the examination header and the authentication aside are dark in both
+ * themes, so their lettering is written as literals rather than tokens. On a true black
+ * background those literals still carry a blue cast, so the dark theme neutralises them
+ * here. The accent stays blue: that is the brand, and it is what marks the active item.
+ */
+[data-theme='dark'] .sidebar,
+[data-theme='dark'] .exam-header,
+[data-theme='dark'] .auth-aside__list { color: #d6d6d6; }
+[data-theme='dark'] .nav-link { color: #cfcfcf; }
+[data-theme='dark'] .nav-link:hover { color: #ffffff; }
+[data-theme='dark'] .nav-link.is-active { color: #ffffff; border-left-color: var(--navy-600); }
+[data-theme='dark'] .brand-text span,
+[data-theme='dark'] .sidebar__footer,
+[data-theme='dark'] .sidebar__context-scope,
+[data-theme='dark'] .auth-aside__note { color: #9c9c9c; }
+[data-theme='dark'] .nav-section,
+[data-theme='dark'] .sidebar__context-label,
+[data-theme='dark'] .sidebar__section-label { color: #8f8f8f; }
+[data-theme='dark'] .auth-aside p,
+[data-theme='dark'] .exam-header__meta,
+[data-theme='dark'] .exam-timer__label { color: #a6a6a6; }
+[data-theme='dark'] .connection-chip { color: #dedede; }
+[data-theme='dark'] .exam-progress__bar { background: var(--navy-500); }
+
 *,
 *::before,
 *::after {

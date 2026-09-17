@@ -201,3 +201,15 @@ describe('dark palette is black, not blue', () => {
     expect(contrast(dark['--accent-contrast'], dark['--navy-700'])).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+describe('dark chrome lettering', () => {
+  const CHROME = ['.sidebar', '.exam-header', '.nav-link', '.nav-section'];
+
+  it('neutralises the always-dark chrome instead of leaving blue-grey literals', () => {
+    const missing = CHROME.filter((selector) => !css.includes(`[data-theme='dark'] ${selector}`));
+    expect(missing, `no dark override for: ${missing.join(', ')}`).toEqual([]);
+    // The literals being overridden must still exist, otherwise the override is dead code.
+    expect(css).toContain('color: #c9d6e2;');
+    expect(css).toContain('color: #7e97ae;');
+  });
+});
