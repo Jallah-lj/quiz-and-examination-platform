@@ -148,6 +148,41 @@ describe('session and token handling', () => {
     expect(withCsrf.status).toBe(201);
   });
 
+  it('accepts the session token from the fallback header when Authorization is stripped', async () => {
+    // Some proxies (sandbox/preview gateways) drop `Authorization` but forward custom
+    // headers, so the same credential must be accepted from either position.
+    const login = await request(harness.app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@alpha.test', password: 'Test-Password1' });
+    const token = login.body.data.sessionToken as string;
+
+    const me = await request(harness.app).get('/api/auth/me').set('X-Session-Token', token);
+    expect(me.body.data.authenticated).toBe(true);
+    expect(me.body.data.user.email).toBe('admin@alpha.test');
+
+    const confused = await request(harness.app).get('/api/auth/me').set('X-Session-Token', 'not-a-session');
+    expect(confused.body.data.authenticated).toBe(false);
+
+    // The fallback header is a session transport, not a CSRF bypass.
+    const withoutCsrf = await request(harness.app)
+      .post('/api/subjects')
+      .set('X-Session-Token', token)
+      .send({ name: 'Fallback Transport', code: 'FT-1' });
+    expect(withoutCsrf.status).toBe(403);
+  });
+
+  it('reports whether a client presented no session or a rejected one', async () => {
+    const anonymous = await request(harness.app).get('/api/auth/me');
+    expect(anonymous.body.data).toMatchObject({ authenticated: false, sessionStatus: 'none' });
+
+    const stale = await request(harness.app).get('/api/auth/me').set('X-Session-Token', 'stale-token-value');
+    expect(stale.body.data).toMatchObject({ authenticated: false, sessionStatus: 'unresolved' });
+
+    const agent = await harness.login('student@alpha.test');
+    const valid = await agent.get('/api/auth/me');
+    expect(valid.body.data).toMatchObject({ authenticated: true, sessionStatus: 'valid' });
+  });
+
   it('prefers a valid bearer token when the cookie is stale', async () => {
     const login = await request(harness.app)
       .post('/api/auth/login')

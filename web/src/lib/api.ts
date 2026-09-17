@@ -124,11 +124,21 @@ export function readCsrfToken(): string {
   return readStorage(CSRF_STORAGE_KEY) || memoryCsrf;
 }
 
-/** Auth headers shared by JSON requests, uploads and file exports. */
+/**
+ * Auth headers shared by JSON requests, uploads and file exports.
+ *
+ * The session token is sent in both `Authorization` and `X-Session-Token`. Some proxies —
+ * sandbox and preview gateways in particular — strip `Authorization` while passing other
+ * headers through; the server accepts either, so a single credential reaches it by at
+ * least one route. Both are verified server-side against the database.
+ */
 export function authHeaders(includeCsrf: boolean): Record<string, string> {
   const headers: Record<string, string> = {};
   const token = getSessionToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+    headers['X-Session-Token'] = token;
+  }
   if (includeCsrf) {
     const csrf = readCsrfToken();
     if (csrf) headers['X-CSRF-Token'] = csrf;

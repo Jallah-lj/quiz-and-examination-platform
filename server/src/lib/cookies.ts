@@ -20,9 +20,25 @@ import { env } from '../config/env';
 
 function requestIsSecure(req: Request): boolean {
   if (req.secure) return true;
-  // Behind a TLS-terminating proxy (the sandbox preview host, a load balancer).
-  const forwarded = req.header('x-forwarded-proto');
-  return typeof forwarded === 'string' && forwarded.split(',')[0].trim().toLowerCase() === 'https';
+  // Behind a TLS-terminating proxy (the sandbox preview host, a load balancer): any of
+  // these may be the only signal that survives the proxy.
+  const forwardedProto = req.header('x-forwarded-proto');
+  if (typeof forwardedProto === 'string' && forwardedProto.split(',')[0].trim().toLowerCase() === 'https') {
+    return true;
+  }
+  if (req.header('x-forwarded-ssl') === 'on') return true;
+  const forwarded = req.header('forwarded');
+  if (typeof forwarded === 'string' && /proto=https/i.test(forwarded)) return true;
+
+  // Last resort, and the case that matters for embedded deployments: the browser tells us
+  // the page's scheme in Origin/Referer even when the proxy forwards no scheme header.
+  // Without this an HTTPS preview would be handed a Lax cookie that a cross-site iframe
+  // never sends, so sign-in would appear to succeed and then fail on the next request.
+  for (const name of ['origin', 'referer'] as const) {
+    const value = req.header(name);
+    if (typeof value === 'string' && value.trim().toLowerCase().startsWith('https://')) return true;
+  }
+  return false;
 }
 
 export interface SessionCookiePolicy {

@@ -27,6 +27,7 @@ interface Call {
   url: string;
   method: string;
   authorization?: string;
+  sessionHeader?: string;
   csrf?: string;
 }
 
@@ -41,7 +42,13 @@ function installTransport(
     const url = String(input);
     const method = init?.method ?? 'GET';
     const headers = (init?.headers ?? {}) as Record<string, string>;
-    calls.push({ url, method, authorization: headers.Authorization, csrf: headers['X-CSRF-Token'] });
+    calls.push({
+      url,
+      method,
+      authorization: headers.Authorization,
+      sessionHeader: headers['X-Session-Token'],
+      csrf: headers['X-CSRF-Token'],
+    });
 
     const respond = (payload: unknown, status = 200) =>
       new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } });
@@ -123,6 +130,8 @@ describe('sign-in flow', () => {
     const meCalls = calls.filter((call) => call.url.endsWith('/api/auth/me'));
     expect(meCalls.length).toBeGreaterThanOrEqual(2);
     expect(meCalls.at(-1)?.authorization).toBe('Bearer session-token-from-login');
+    // Sent twice on purpose: proxies that strip Authorization still forward this one.
+    expect(meCalls.at(-1)?.sessionHeader).toBe('session-token-from-login');
   });
 
   it('uses the readable CSRF cookie as the fallback when the cookie is present', async () => {
@@ -143,7 +152,7 @@ describe('sign-in flow', () => {
 
   it('refuses to continue when the session cannot be confirmed, and says why', async () => {
     const user = userEvent.setup();
-    installTransport({ authenticated: false });
+    const calls = installTransport({ authenticated: false });
     renderLogin();
 
     await user.type(screen.getByLabelText(/email address/i), 'demo.admin@northgate.edu');
@@ -154,7 +163,59 @@ describe('sign-in flow', () => {
     expect(screen.queryByRole('heading', { name: /institution dashboard/i })).not.toBeInTheDocument();
     // ...and the discarded token is not retried forever.
     expect(getSessionToken()).toBe('');
-    expect(await screen.findByRole('alert')).toHaveTextContent(/did not accept the session/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/did not accept the sign-in/i);
+    // A rejected credential is retried exactly once (cookie-only), never in a loop.
+    expect(calls.filter((call) => call.url.endsWith('/api/auth/me'))).toHaveLength(3);
+  });
+
+  it('recovers when a stale credential was shadowing the fresh sign-in', async () => {
+    const user = userEvent.setup();
+    // The first confirmation fails because the browser sent a credential the server no
+    // longer recognises; once the client drops it, the cookie path succeeds.
+    let meCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const respond = (payload: unknown) =>
+        new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (url.endsWith('/api/auth/login')) {
+        return respond({
+          data: {
+            user: ADMIN,
+            csrfToken: 'csrf-from-login',
+            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+            sessionToken: 'token-from-login',
+            tokenTransport: 'bearer',
+          },
+        });
+      }
+      if (url.endsWith('/api/auth/me')) {
+        meCalls += 1;
+        // Call 1: bootstrap. Call 2: stale credential rejected. Call 3: cookie accepted.
+        if (meCalls >= 3) {
+          return respond({ data: { authenticated: true, sessionStatus: 'valid', csrfToken: 'csrf', user: ADMIN } });
+        }
+        return respond({
+          data: {
+            authenticated: false,
+            sessionStatus: meCalls === 1 ? 'none' : 'unresolved',
+            csrfToken: null,
+            user: null,
+          },
+        });
+      }
+      return respond({ data: {} });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderLogin();
+    await user.type(screen.getByLabelText(/email address/i), 'demo.admin@northgate.edu');
+    await user.type(screen.getByLabelText(/^password/i), 'Demo-Password1');
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
+
+    // The user reaches the dashboard instead of being stuck on a dead credential...
+    expect(await screen.findByRole('heading', { name: /institution dashboard/i })).toBeInTheDocument();
+    // ...and keeps a CSRF token for state-changing requests even though the cookie is gone.
+    expect(readCsrfToken()).toBe('csrf');
   });
 
   it('reports invalid credentials without leaking whether the account exists', async () => {

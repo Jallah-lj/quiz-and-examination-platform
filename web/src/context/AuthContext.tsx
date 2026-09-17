@@ -69,21 +69,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Confirm the session is actually usable from this browser context before we let
       // the user in; otherwise every screen would fail with a generic load error.
-      const me = await api.get<MeResponse>('/auth/me');
+      let me = await api.get<MeResponse>('/auth/me');
       if (!me.authenticated || !me.user) {
+        // A credential left over from an earlier session (for example a token issued
+        // before the database was rebuilt) can only ever shadow a fresh sign-in, never
+        // help. Drop everything the client kept and confirm once more with cookie-only
+        // state before reporting a failure.
         const hadToken = Boolean(getSessionToken());
         clearSessionToken();
-        throw new ApiError(
-          401,
-          'SESSION_NOT_ESTABLISHED',
-          hadToken
-            ? 'The server did not accept the session that this browser kept. Please sign in again; if it keeps happening, contact your administrator.'
-            : isStorageAvailable()
-              ? 'Your browser discarded the sign-in cookie and no fallback session was issued. Reload the page (hard reload) and sign in again.'
-              : 'This browser blocks cookies and site storage, which are required to keep you signed in. Enable them for this site, or open the application in a new browser tab.',
-        );
+        // Keep the CSRF value issued with this sign-in: a cookie-less client still needs it
+        // for state-changing requests, and the retry below may succeed without the cookie.
+        if (result.csrfToken) setCsrfToken(result.csrfToken);
+        me = await api.get<MeResponse>('/auth/me');
+        if (!me.authenticated || !me.user) {
+          throw new ApiError(
+            401,
+            'SESSION_NOT_ESTABLISHED',
+            me.sessionStatus === 'unresolved' || hadToken
+              ? 'The server did not accept the sign-in for this browser. Please reload the page and sign in again; if it keeps happening, contact your administrator.'
+              : isStorageAvailable()
+                ? 'Your browser discarded the sign-in cookie and the fallback session token did not reach the server. Reload the page (hard reload) and sign in again.'
+                : 'This browser blocks cookies and site storage, which are required to keep you signed in. Enable them for this site, or open the application in a new browser tab.',
+          );
+        }
       }
 
+      if (me.csrfToken) setCsrfToken(me.csrfToken);
       setUser(result.user);
       setStatus('authenticated');
       await queryClient.invalidateQueries();

@@ -4,7 +4,7 @@ import { getDb } from '../db';
 import { asyncHandler, ok } from '../lib/http';
 import { parseWith } from '../lib/validation';
 import { z } from 'zod';
-import { authenticate, requireAuth } from '../middleware/auth';
+import { authenticate, extractTokenCandidates, requireAuth } from '../middleware/auth';
 import { createRateLimiter } from '../middleware/security';
 import {
   changePassword,
@@ -108,7 +108,11 @@ router.get(
   authenticate,
   asyncHandler(async (req: AuthedRequest, res) => {
     if (!req.user) {
-      return ok(res, { authenticated: false, user: null });
+      // Distinguishes "this client sent no session at all" (cookies blocked, no token yet)
+      // from "a session was presented and rejected" (stale/revoked/expired). The client
+      // needs that difference to recover instead of looping on a dead credential.
+      const status = extractTokenCandidates(req).length > 0 ? 'unresolved' : 'none';
+      return ok(res, { authenticated: false, sessionStatus: status, user: null });
     }
     const db = getDb();
     const csrfToken = req.cookies?.[`${env.cookieName}_csrf`] ?? null;
@@ -143,6 +147,7 @@ router.get(
 
     return ok(res, {
       authenticated: true,
+      sessionStatus: 'valid' as const,
       csrfToken,
       unreadNotifications: unread,
       user: {

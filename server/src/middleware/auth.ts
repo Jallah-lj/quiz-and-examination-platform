@@ -7,15 +7,29 @@ import type { AuthedRequest, RoleCode } from '../types';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-/** Candidate session tokens for a request, most preferred first (cookie, then bearer). */
+/**
+ * Candidate session tokens for a request, most preferred first: the session cookie, then
+ * `Authorization: Bearer`, then the same token in a dedicated header.
+ *
+ * The extra header exists because some proxies (sandbox/preview gateways, corporate
+ * middleboxes) strip or rewrite `Authorization` while passing custom headers through. The
+ * token is identical in all three positions and is always verified against the database,
+ * so this adds reach without weakening anything: CSRF is still required for state changes.
+ */
 export function extractTokenCandidates(req: AuthedRequest): string[] {
   const candidates: string[] = [];
   const cookieToken = req.cookies?.[env.cookieName];
   if (typeof cookieToken === 'string' && cookieToken) candidates.push(cookieToken);
+
   const header = req.header('authorization');
   if (header?.toLowerCase().startsWith('bearer ')) {
     const bearer = header.slice(7).trim();
     if (bearer) candidates.push(bearer);
+  }
+
+  for (const name of ['x-session-token', 'x-auth-token'] as const) {
+    const value = req.header(name);
+    if (typeof value === 'string' && value.trim()) candidates.push(value.trim());
   }
   return candidates;
 }
@@ -32,6 +46,9 @@ export function extractToken(req: AuthedRequest): string | null {
  */
 export function authenticate(req: AuthedRequest, _res: Response, next: NextFunction): void {
   try {
+    // Already resolved by an earlier middleware in the chain (the app authenticates
+    // globally and again per router); never resolve the same session twice.
+    if (req.user) return next();
     const candidates = extractTokenCandidates(req);
     if (!candidates.length) return next();
     const db = getDb();

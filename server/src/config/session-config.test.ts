@@ -106,4 +106,22 @@ describe('session cookie policy', () => {
     expect(policy.secure).toBe(true);
     expect(policy.sameSite).toBe('none');
   });
+
+  it('detects HTTPS from the page origin when the proxy forwards no scheme header', async () => {
+    // This is the embedded-preview case: the gateway adds no X-Forwarded-Proto, so the
+    // only signal is the scheme of the page that issued the request. Missing it produced a
+    // Lax cookie that a cross-site iframe never sends, i.e. "login works, then nothing".
+    const policy = await policyFor({
+      host: '5173-abc.e2b.app',
+      origin: 'https://5173-abc.e2b.app',
+    });
+    expect(policy.secure).toBe(true);
+    expect(policy.sameSite).toBe('none');
+  });
+
+  it('treats a plain-HTTP page as insecure even when a proxy claims otherwise', async () => {
+    const policy = await policyFor({ host: 'localhost:5173', origin: 'http://localhost:5173' });
+    expect(policy.secure).toBe(false);
+    expect(policy.sameSite).toBe('lax');
+  });
 });

@@ -54,6 +54,8 @@ export interface SessionUser {
 
 export interface MeResponse {
   authenticated: boolean;
+  /** Why an unauthenticated answer was given: no session presented, or one rejected. */
+  sessionStatus?: 'valid' | 'unresolved' | 'none';
   csrfToken: string | null;
   unreadNotifications?: number;
   user: SessionUser | null;

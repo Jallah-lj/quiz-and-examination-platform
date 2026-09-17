@@ -54,11 +54,19 @@ if (!env.isProd) {
       const authed = req as AuthedRequest;
       const hasCookie = Boolean(req.cookies?.[env.cookieName]);
       const hasBearer = Boolean(req.header('authorization'));
-      const presented = [hasCookie ? 'cookie' : null, hasBearer ? 'bearer' : null].filter(Boolean).join('+') || 'none';
+      const hasTokenHeader = Boolean(req.header('x-session-token') || req.header('x-auth-token'));
+      const presented =
+        [hasCookie ? 'cookie' : null, hasBearer ? 'bearer' : null, hasTokenHeader ? 'token-header' : null]
+          .filter(Boolean)
+          .join('+') || 'none';
+      // Header *names* only, never values: this is how we tell whether a proxy is dropping
+      // the credential (or the cookie) before the request ever reaches the application.
+      const headerNames = Object.keys(req.headers).sort().join(',');
       // eslint-disable-next-line no-console
       console.log(
         `[req] ${req.method} ${req.originalUrl} ${res.statusCode} ` +
-          `presented=${presented} user=${authed.user ? `#${authed.user.id}` : 'none'} ${Date.now() - startedAt}ms`,
+          `presented=${presented} user=${authed.user ? `#${authed.user.id}` : 'none'} ${Date.now() - startedAt}ms` +
+          (presented === 'none' ? ` headers=[${headerNames}]` : ''),
       );
     });
     next();

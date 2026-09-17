@@ -53,8 +53,11 @@ describe('api client', () => {
     setCsrfToken('csrf-from-login-response');
     document.cookie = `${CSRF_COOKIE}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
 
+    // Both transports carry the same token: some proxies strip Authorization, so the
+    // dedicated header is the fallback route to the server.
     expect(authHeaders(true)).toEqual({
       Authorization: 'Bearer token-from-login-response',
+      'X-Session-Token': 'token-from-login-response',
       'X-CSRF-Token': 'csrf-from-login-response',
     });
 
@@ -86,6 +89,7 @@ describe('api client', () => {
       expect(readCsrfToken()).toBe('memory-only-csrf');
       expect(authHeaders(true)).toEqual({
         Authorization: 'Bearer memory-only-token',
+        'X-Session-Token': 'memory-only-token',
         'X-CSRF-Token': 'memory-only-csrf',
       });
     } finally {
