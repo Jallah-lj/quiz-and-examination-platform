@@ -111,7 +111,12 @@ export function listGradingQueue(
               CASE WHEN a.exam_id IS NOT NULL THEN 'EXAM' ELSE 'QUIZ' END AS kind,
               u.full_name AS student_name, s.student_code, s.id AS student_id, sub.name AS subject_name,
               (SELECT COUNT(*) FROM attempt_questions aq WHERE aq.attempt_id = a.id AND aq.is_objective = 0) AS subjective_count,
-              (SELECT COUNT(*) FROM answers an WHERE an.attempt_id = a.id AND an.awarded_marks IS NULL) AS ungraded_count,
+              -- Counted against the paper snapshot so a written question the candidate
+              -- skipped is reported as unmarked too: that is exactly what blocks publication.
+              (SELECT COUNT(*) FROM attempt_questions aq
+                 LEFT JOIN answers an ON an.attempt_id = aq.attempt_id AND an.question_id = aq.question_id
+                WHERE aq.attempt_id = a.id AND aq.is_objective = 0
+                  AND (an.id IS NULL OR an.awarded_marks IS NULL)) AS ungraded_count,
               e.id AS exam_id, qz.id AS quiz_id
        ${base}
        ORDER BY a.submitted_at DESC

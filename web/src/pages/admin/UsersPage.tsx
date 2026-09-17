@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../lib/api';
 import { formatDateTime, titleCase } from '../../lib/format';
@@ -62,7 +63,14 @@ export default function UsersPage() {
   const toast = useToast();
   const isPlatformAdmin = user?.role === 'super_admin';
   const [tab, setTab] = useState('accounts');
-  const list = useListState({ role: '', status: '', institutionId: '' });
+  // Dashboard exception panels deep-link here, e.g. /users?status=pending. The value
+  // seeds the visible status filter so the list opens already narrowed.
+  const [searchParams] = useSearchParams();
+  const list = useListState({
+    role: searchParams.get('role') ?? '',
+    status: searchParams.get('status') ?? '',
+    institutionId: searchParams.get('institutionId') ?? '',
+  });
   const [editing, setEditing] = useState<UserRow | 'new' | null>(null);
   const [statusTarget, setStatusTarget] = useState<UserRow | null>(null);
   const [resetTarget, setResetTarget] = useState<UserRow | null>(null);

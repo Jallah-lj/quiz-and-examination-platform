@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { formatDateTime, formatPercentage } from '../../lib/format';
@@ -23,7 +23,16 @@ import { IconPlus, IconSearch } from '../../components/Icons';
 
 export default function ExamsPage() {
   const { hasPermission, user } = useAuth();
-  const list = useListState({ subjectId: '', classId: '', status: '', examType: '', mine: '' });
+  // Dashboard exception panels link here with the filter already applied, e.g.
+  // /examinations?status=SCHEDULED. The value seeds the visible filter control below.
+  const [searchParams] = useSearchParams();
+  const list = useListState({
+    subjectId: '',
+    classId: '',
+    status: searchParams.get('status') ?? '',
+    examType: '',
+    mine: searchParams.get('mine') ?? '',
+  });
   const [target, setTarget] = useState<StartAttemptTarget | null>(null);
   const isStudent = user?.role === 'student';
 

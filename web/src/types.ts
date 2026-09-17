@@ -764,6 +764,23 @@ export interface PermissionRow {
   category: string;
 }
 
+/** Actionable exception raised by the dashboard aggregations, with a link to resolve it. */
+export interface DashboardAttention {
+  key: string;
+  severity: 'info' | 'warning' | 'danger';
+  title: string;
+  detail: string;
+  link: string;
+}
+
+/** Period-over-period movement for a headline figure. */
+export interface DashboardDelta {
+  current: number;
+  previous: number;
+  days: number;
+  changePercent: number | null;
+}
+
 export interface StudentDashboard {
   student: {
     id: number;
@@ -783,10 +800,31 @@ export interface StudentDashboard {
     passed: number;
     failed: number;
     average_percentage: number;
+    best_percentage: number;
     availableExams: number;
     upcomingExams: number;
     availableQuizzes: number;
   };
+  attention: DashboardAttention[];
+  nextDeadline: {
+    kind: 'EXAM' | 'QUIZ';
+    id: number;
+    title: string;
+    paper_code: string | null;
+    subject_name: string | null;
+    due_at: string;
+    start_at: string | null;
+    action: 'start' | 'resume';
+  } | null;
+  subjectPerformance: {
+    subject: string;
+    results: number;
+    average_percentage: number;
+    passed: number;
+    best_percentage: number;
+  }[];
+  scoreTrend: { at: string; percentage: number; grade: string | null; paper_title: string; label: string }[];
+  limitReached: { kind: 'EXAM' | 'QUIZ'; id: number; title: string }[];
   availableExams: {
     id: number;
     name: string;
@@ -862,27 +900,111 @@ export interface AdminDashboard {
   gradeDistribution: { grade: string; count: number }[];
   submissionsByDay: { day: string; submissions: number }[];
   classPerformance: { id: number; class_name: string; students: number; average_percentage: number }[];
+  attention: DashboardAttention[];
+  gradingBacklog: { ungraded_answers: number; attempts: number; oldest_waiting: string | null };
+  paperIntegrity: {
+    exams_without_questions: number;
+    scheduled_without_candidates: number;
+    pending_accounts: number;
+    exams_ending_soon: number;
+  };
+  examPipeline: { status: ExamStatus; count: number; window_open: number }[];
+  upcomingExams: {
+    id: number;
+    name: string;
+    code: string;
+    status: ExamStatus;
+    start_at: string;
+    end_at: string;
+    duration_minutes: number;
+    total_marks: number;
+    max_attempts: number;
+    subject_name: string | null;
+    class_name: string | null;
+    question_count: number;
+    assignment_count: number;
+  }[];
+  examPerformance: {
+    id: number;
+    name: string;
+    code: string;
+    status: ExamStatus;
+    total_marks: number;
+    pass_marks: number;
+    subject_name: string | null;
+    attempts: number;
+    published: number;
+    average_percentage: number;
+    pass_rate: number;
+  }[];
+  atRiskStudents: {
+    id: number;
+    student_code: string;
+    full_name: string;
+    class_name: string | null;
+    graded_results: number;
+    average_percentage: number;
+  }[];
+  deltas: { submissions: DashboardDelta; publishedResults: DashboardDelta };
 }
 
 export interface TeacherDashboard {
   serverTime: string;
   scope: { institutionId: number; role: RoleCode };
-  activeExams: Exam[];
-  upcomingExams: Exam[];
+  activeExams: (Exam & { attempts: number; live: number })[];
+  upcomingExams: (Exam & { assignments: number })[];
   drafts: Exam[];
-  recentSubmissions: GradingQueueItem[];
+  recentSubmissions: {
+    id: number;
+    status: AttemptStatus;
+    submitted_at: string | null;
+    obtained_marks: number | null;
+    max_marks: number;
+    percentage: number | null;
+    auto_submitted: number;
+    paper_title: string | null;
+    student_name: string;
+    student_code: string;
+    kind: 'EXAM' | 'QUIZ';
+    grade: string | null;
+    is_published: number | null;
+    ungraded: number;
+  }[];
   awaitingGrading: { attempts: number; ungraded_answers: number };
   examStats: { total_exams: number; active: number; draft: number; published: number };
   averages: { average_percentage: number; graded_results: number };
   questionBankStats: { active_questions: number; my_questions: number; banks: number; easy: number; medium: number; hard: number };
   publishedResults: { published: number; passed: number; failed: number };
   weeklyActivity: { day: string; submissions: number }[];
+  attention: DashboardAttention[];
+  gradingBacklog: { oldest_submission: string | null; attempts: number; ungraded_answers: number };
+  paperHealth: { exams_without_questions: number; scheduled_without_candidates: number; exams_ending_soon: number };
+  examPerformance: {
+    id: number;
+    name: string;
+    code: string;
+    status: ExamStatus;
+    total_marks: number;
+    pass_marks: number;
+    subject_name: string | null;
+    class_name: string | null;
+    question_count: number;
+    assignment_count: number;
+    attempts: number;
+    average_percentage: number;
+    pass_rate: number;
+  }[];
 }
 
 export interface PlatformDashboard {
   serverTime: string;
   counts: Record<string, number>;
+  attention: DashboardAttention[];
+  deltas: { submissions: DashboardDelta; signups: DashboardDelta };
   loginActivity: { day: string; successful: number; failed: number }[];
+  accountMix: { status: string; count: number }[];
+  institutionStatus: { status: string; count: number }[];
+  submissionsByDay: { day: string; submissions: number }[];
   institutionBreakdown: {
     id: number;
     name: string;

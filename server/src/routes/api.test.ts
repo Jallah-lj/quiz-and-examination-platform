@@ -608,6 +608,181 @@ describe('reports and audit', () => {
   });
 });
 
+describe('role dashboards', () => {
+  it('surfaces the candidate work queue, next deadline and score history', async () => {
+    const student = await harness.login('student@alpha.test');
+    const before = await student.get('/api/dashboard/student');
+    expect(before.status).toBe(200);
+    expect(before.body.data.scoreTrend).toEqual([]);
+    expect(typeof before.body.data.stats.best_percentage).toBe('number');
+    expect(before.body.data.nextDeadline.kind).toBe('EXAM');
+    expect(before.body.data.nextDeadline.action).toBe('start');
+
+    // Starting an attempt moves the candidate into a state the panel must report.
+    const start = await student.post('/api/attempts').send({ examId: fixture.examId });
+    expect(start.status).toBe(201);
+
+    const after = await student.get('/api/dashboard/student');
+    const keys = after.body.data.attention.map((item: { key: string }) => item.key);
+    expect(keys).toContain('resume');
+    expect(after.body.data.nextDeadline.action).toBe('resume');
+    expect(after.body.data.attention.every((item: { link: string }) => item.link.startsWith('/'))).toBe(true);
+  });
+
+  it('reports the written answers still blocking publication, including blank ones', async () => {
+    const student = await harness.login('student@alpha.test');
+    const start = await student.post('/api/attempts').send({ examId: fixture.examId });
+    const attemptId = start.body.data.attemptId as number;
+    for (const questionId of fixture.objectiveQuestions) {
+      await student.patch(`/api/attempts/${attemptId}/answers/${questionId}`).send({ selectedOptions: ['A'] });
+    }
+    await student
+      .patch(`/api/attempts/${attemptId}/answers/${fixture.fillBlankQuestionId}`)
+      .send({ answerText: 'Paris' });
+    await student
+      .patch(`/api/attempts/${attemptId}/answers/${fixture.essayQuestionId}`)
+      .send({ answerText: 'Indexes cut the pages read per lookup.' });
+    const submit = await student.post(`/api/attempts/${attemptId}/submit`).send({});
+    expect(submit.status).toBe(200);
+    expect(submit.body.data.status).toBe('UNDER_REVIEW');
+
+    const teacher = await harness.login('teacher@alpha.test');
+    const dashboard = await teacher.get('/api/dashboard/teacher');
+    expect(dashboard.status).toBe(200);
+    // The fixture paper holds exactly one written question, and it is unmarked.
+    expect(dashboard.body.data.gradingBacklog).toMatchObject({ ungraded_answers: 1, attempts: 1 });
+    expect(dashboard.body.data.gradingBacklog.oldest_submission).toBeTruthy();
+    const flagged = dashboard.body.data.attention.find((item: { key: string }) => item.key === 'grading');
+    expect(flagged.link).toBe('/grading');
+    expect(dashboard.body.data.paperHealth).toMatchObject({
+      exams_without_questions: expect.any(Number),
+      scheduled_without_candidates: expect.any(Number),
+      exams_ending_soon: expect.any(Number),
+    });
+
+    // The marking queue must agree with the dashboard and with the publication gate.
+    const queue = await teacher.get('/api/grading/queue?status=pending&pageSize=50');
+    const queued = queue.body.data.find((row: { id: number }) => row.id === attemptId);
+    expect(queued).toMatchObject({ subjective_count: 1, ungraded_count: 1 });
+
+    // Marking it clears both the figure and the exception that points at it.
+    const detail = await teacher.get(`/api/grading/attempts/${attemptId}`);
+    const essay = detail.body.data.questions.find((question: any) => question.type === 'ESSAY');
+    const marked = await teacher
+      .post(`/api/grading/attempts/${attemptId}/answers/${essay.answer.id}`)
+      .send({ awardedMarks: 12, comment: 'Marked.' });
+    expect(marked.status).toBe(200);
+
+    const cleared = await teacher.get('/api/dashboard/teacher');
+    expect(cleared.body.data.gradingBacklog.ungraded_answers).toBe(0);
+    expect(
+      cleared.body.data.attention.find((item: { key: string }) => item.key === 'grading'),
+    ).toBeUndefined();
+    const clearedQueue = await teacher.get('/api/grading/queue?status=pending&pageSize=50');
+    expect(
+      clearedQueue.body.data.find((row: { id: number }) => row.id === attemptId).ungraded_count,
+    ).toBe(0);
+  });
+
+  it('reports institution lifecycle, movement and continuous daily series to administrators', async () => {
+    const admin = await harness.login('admin@alpha.test');
+    const dashboard = await admin.get('/api/dashboard/admin');
+    expect(dashboard.status).toBe(200);
+    const body = dashboard.body.data;
+
+    // The pipeline must account for every examination in the institution.
+    const pipelined = body.examPipeline.reduce(
+      (sum: number, stage: { count: number }) => sum + stage.count,
+      0,
+    );
+    expect(pipelined).toBe(body.counts.exams);
+
+    expect(body.deltas.submissions).toMatchObject({
+      current: expect.any(Number),
+      previous: expect.any(Number),
+      days: 14,
+    });
+    // Charts need a continuous range: one row per day, oldest first, no gaps.
+    expect(body.submissionsByDay).toHaveLength(30);
+    const days = body.submissionsByDay.map((row: { day: string }) => row.day);
+    expect([...days].sort()).toEqual(days);
+    expect(new Set(days).size).toBe(30);
+    expect(Object.prototype.hasOwnProperty.call(body.submissionsByDay[0], 'submissions')).toBe(true);
+
+    expect(body.paperIntegrity).toMatchObject({
+      exams_without_questions: expect.any(Number),
+      scheduled_without_candidates: expect.any(Number),
+      pending_accounts: expect.any(Number),
+      exams_ending_soon: expect.any(Number),
+    });
+    expect(body.atRiskStudents).toEqual([]);
+    expect(body.attention.every((item: { link: string }) => item.link.startsWith('/'))).toBe(true);
+  });
+
+  it('keeps the platform dashboard scoped to platform staff with continuous activity series', async () => {
+    const platform = await harness.login('platform@examsys.test');
+    const dashboard = await platform.get('/api/dashboard/platform');
+    expect(dashboard.status).toBe(200);
+    expect(dashboard.body.data.submissionsByDay).toHaveLength(30);
+    expect(dashboard.body.data.loginActivity).toHaveLength(14);
+    expect(dashboard.body.data.accountMix.length).toBeGreaterThan(0);
+    expect(dashboard.body.data.deltas.signups.days).toBe(30);
+    // Beta Institute has no administrator, so the exception is legitimate.
+    const flagged = dashboard.body.data.attention.find(
+      (item: { key: string }) => item.key === 'institutions-without-admin',
+    );
+    expect(flagged.title).toContain('1 active institution');
+
+    // The internal platform office is not a tenant: adding it must not raise the count.
+    db.prepare(
+      `INSERT INTO institutions (name, code, status, is_demo, created_at, updated_at)
+       VALUES ('Platform Office', 'PLATFORM', 'active', 0, ?, ?)`,
+    ).run(nowIso(), nowIso());
+    const withOffice = await platform.get('/api/dashboard/platform');
+    const stillOne = withOffice.body.data.attention.find(
+      (item: { key: string }) => item.key === 'institutions-without-admin',
+    );
+    expect(stillOne.title).toContain('1 active institution');
+
+    const admin = await harness.login('admin@alpha.test');
+    const forbidden = await admin.get('/api/dashboard/platform');
+    expect(forbidden.status).toBe(403);
+  });
+
+  it('filters the question bank to questions stored without an explanation', async () => {
+    const teacher = await harness.login('teacher@alpha.test');
+    const author = { questionBankId: fixture.bankId, subjectId: fixture.subjectId, type: 'MCQ', marks: 2 };
+    const withoutExplanation = await teacher.post('/api/questions').send({
+      ...author,
+      text: 'Which structure holds a LIFO order?',
+      options: [
+        { label: 'A', text: 'Queue', isCorrect: false, position: 0 },
+        { label: 'B', text: 'Stack', isCorrect: true, position: 1 },
+      ],
+    });
+    expect(withoutExplanation.status).toBe(201);
+    const withExplanation = await teacher.post('/api/questions').send({
+      ...author,
+      text: 'Which structure holds a FIFO order?',
+      explanation: 'A queue removes the oldest element first.',
+      options: [
+        { label: 'A', text: 'Stack', isCorrect: false, position: 0 },
+        { label: 'B', text: 'Queue', isCorrect: true, position: 1 },
+      ],
+    });
+    expect(withExplanation.status).toBe(201);
+
+    const filtered = await teacher.get('/api/questions?pageSize=100&mine=true&missingExplanation=true');
+    expect(filtered.status).toBe(200);
+    const ids = filtered.body.data.map((question: { id: number }) => question.id);
+    expect(ids).toContain(withoutExplanation.body.data.id);
+    expect(ids).not.toContain(withExplanation.body.data.id);
+    expect(
+      filtered.body.data.every((question: { created_by_name: string }) => question.created_by_name === 'Tom Teacher'),
+    ).toBe(true);
+  });
+});
+
 describe('error handling', () => {
   it('returns a professional 404 payload for unknown endpoints', async () => {
     const response = await harness.agent().get('/api/does-not-exist');

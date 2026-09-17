@@ -50,6 +50,10 @@ export default function QuestionsPage() {
       difficulty: '',
       status: 'ACTIVE',
       topic: '',
+      // Seeded from the examiner dashboard's data-quality link, e.g.
+      // /questions?mine=true&missingExplanation=true. The controls below stay visible.
+      mine: searchParams.get('mine') === 'true' || searchParams.get('mine') === '1' ? 'true' : '',
+      missingExplanation: searchParams.get('missingExplanation') === 'true' ? 'true' : '',
       sort: 'updated',
       order: 'desc',
     },
@@ -89,6 +93,8 @@ export default function QuestionsPage() {
         difficulty: list.filters.difficulty || undefined,
         status: list.filters.status || undefined,
         topic: list.filters.topic || undefined,
+        mine: list.filters.mine || undefined,
+        missingExplanation: list.filters.missingExplanation || undefined,
       }),
   });
 
@@ -292,6 +298,20 @@ export default function QuestionsPage() {
             placeholder="All topics"
             value={list.filters.topic}
             onChange={(event) => list.updateFilter('topic', event.target.value)}
+          />
+          <SelectInput
+            wrapperClassName="filter-bar__field"
+            options={[{ value: 'true', label: 'Authored by me' }]}
+            placeholder="All authors"
+            value={list.filters.mine}
+            onChange={(event) => list.updateFilter('mine', event.target.value)}
+          />
+          <SelectInput
+            wrapperClassName="filter-bar__field"
+            options={[{ value: 'true', label: 'Explanation missing' }]}
+            placeholder="Any explanation"
+            value={list.filters.missingExplanation}
+            onChange={(event) => list.updateFilter('missingExplanation', event.target.value)}
           />
           <Button
             size="sm"

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../lib/api';
 import { formatDate, formatPercentage } from '../../lib/format';
@@ -54,7 +55,18 @@ export default function StudentsPage() {
   const { hasPermission } = useAuth();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const list = useListState({ classId: '', status: '', departmentId: '' });
+  // Deep links from the institution dashboard, e.g. /students?q=NIT-2025-0006, seed the
+  // visible filters and search box so the list opens on the candidate in question.
+  const [searchParams] = useSearchParams();
+  const list = useListState(
+    {
+      classId: searchParams.get('classId') ?? '',
+      status: searchParams.get('status') ?? '',
+      departmentId: searchParams.get('departmentId') ?? '',
+    },
+    20,
+    searchParams.get('q') ?? '',
+  );
   const [editing, setEditing] = useState<Student | 'new' | null>(null);
 
   const classes = useQuery({

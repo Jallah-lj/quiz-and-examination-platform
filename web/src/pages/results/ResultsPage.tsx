@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../lib/api';
 import { formatDate, formatDateTime, formatMark, formatPercentage } from '../../lib/format';
 import { useListState } from '../../lib/hooks';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import type { ClassRow, Exam, ResultRow, ResultStats, Subject } from '../../types';
 import {
@@ -29,7 +30,20 @@ export default function ResultsPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const isStudent = user?.role === 'student';
-  const list = useListState({ examId: '', subjectId: '', classId: '', outcome: '', published: '', from: '', to: '', sort: 'date', order: 'desc' });
+  // Dashboard links arrive pre-filtered, e.g. /results?examId=12; the values seed the
+  // visible filter controls below.
+  const [searchParams] = useSearchParams();
+  const list = useListState({
+    examId: searchParams.get('examId') ?? '',
+    subjectId: searchParams.get('subjectId') ?? '',
+    classId: searchParams.get('classId') ?? '',
+    outcome: searchParams.get('outcome') ?? '',
+    published: searchParams.get('published') ?? '',
+    from: '',
+    to: '',
+    sort: 'date',
+    order: 'desc',
+  });
   const [selected, setSelected] = useState<number[]>([]);
   const [publishAction, setPublishAction] = useState<{ publish: boolean; attemptIds: number[] } | null>(null);
 

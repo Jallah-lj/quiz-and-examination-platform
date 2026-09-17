@@ -2232,3 +2232,121 @@ table.data-table {
   color: var(--ink-700);
 }
 .option-list--preview .option { cursor: default; background: var(--surface-sunken); }
+
+/* ------------------------------------------------------- dashboard building blocks */
+.card__header h2 + p { margin: 0.15rem 0 0; font-size: 0.85rem; color: var(--ink-500); font-weight: 400; }
+
+/* Work queue: severity is carried by an icon, a text badge and a left rule. */
+.attention-list { list-style: none; margin: 0; padding: 0; }
+.attention-list__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--ink-100);
+  border-left: 3px solid var(--ink-200);
+}
+.attention-list__item:last-child { border-bottom: 0; }
+.attention-list__item--info { border-left-color: var(--navy-500); }
+.attention-list__item--warning { border-left-color: var(--amber-600); background: #fffdf7; }
+.attention-list__item--danger { border-left-color: var(--red-600); background: #fffaf9; }
+.attention-list__icon { display: inline-flex; padding-top: 0.15rem; color: var(--ink-500); }
+.attention-list__item--warning .attention-list__icon { color: var(--amber-700); }
+.attention-list__item--danger .attention-list__icon { color: var(--red-700); }
+.attention-list__body { flex: 1; min-width: 0; }
+.attention-list__title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-weight: 600;
+  color: var(--ink-800);
+}
+.attention-list__body p { margin: 0.2rem 0 0; font-size: 0.85rem; color: var(--ink-600); }
+
+/* Next-deadline banner for candidates. */
+.deadline {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--navy-500);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 1.1rem;
+  flex-wrap: wrap;
+}
+.deadline--urgent { border-left-color: var(--amber-600); background: #fffdf7; }
+.deadline--none { border-left-color: var(--ink-300); }
+.deadline__icon { display: inline-flex; color: var(--navy-600); }
+.deadline--urgent .deadline__icon { color: var(--amber-700); }
+.deadline__body { flex: 1; min-width: 220px; }
+.deadline__body strong { display: block; color: var(--ink-800); }
+.deadline__body p { margin: 0.15rem 0 0; font-size: 0.85rem; color: var(--ink-600); }
+.deadline__actions { display: inline-flex; align-items: center; gap: 0.4rem; }
+
+/* Period-over-period movement. The wording ("Up 12%") carries the meaning. */
+.stat-delta { display: block; font-size: 0.8rem; color: var(--ink-500); }
+.stat-delta--up { color: var(--green-700); }
+.stat-delta--down { color: var(--amber-700); }
+.stat-delta--flat { color: var(--ink-500); }
+
+.stat-breakdown { display: inline-flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.stat-breakdown__item { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--ink-600); }
+
+/* Ranked bars used for subject, class and institution comparisons. */
+.metric-list__label { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.metric-list__label em { font-style: normal; font-size: 0.78rem; color: var(--ink-500); }
+
+/* Examination lifecycle strip. */
+.pipeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+.pipeline__stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.6rem 0.4rem;
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--navy-500);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  text-align: center;
+}
+.pipeline__stage--empty { border-top-color: var(--ink-200); color: var(--ink-500); background: var(--surface); }
+.pipeline__count { font-size: 1.15rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink-800); }
+.pipeline__stage--empty .pipeline__count { color: var(--ink-400); }
+.pipeline__label { font-size: 0.78rem; color: var(--ink-600); }
+
+/* Structural readiness checks. */
+.check-list { list-style: none; margin: 0; padding: 0; }
+.check-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--ink-100);
+  font-size: 0.88rem;
+}
+.check-list__item:last-child { border-bottom: 0; }
+
+.stacked { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 0.2rem; }
+
+@media (max-width: 900px) {
+  .pipeline { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .attention-list__item { flex-wrap: wrap; }
+  .attention-list__item .btn { margin-left: 2.1rem; }
+  .deadline__actions { width: 100%; }
+}

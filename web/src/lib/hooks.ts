@@ -15,8 +15,12 @@ export function useDebouncedValue<T>(value: T, delay = 350): T {
  * Small state container for list screens: debounced search text plus arbitrary filters,
  * always resetting pagination when a filter changes.
  */
-export function useListState<TFilters extends Record<string, string>>(initial: TFilters, initialPageSize = 20) {
-  const [search, setSearch] = useState('');
+export function useListState<TFilters extends Record<string, string>>(
+  initial: TFilters,
+  initialPageSize = 20,
+  initialSearch = '',
+) {
+  const [search, setSearch] = useState(initialSearch);
   const [filters, setFilters] = useState<TFilters>(initial);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(initialPageSize);

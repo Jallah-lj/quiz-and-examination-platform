@@ -257,9 +257,14 @@ router.get(
       where.push('EXISTS (SELECT 1 FROM json_each(q.tags) WHERE value = ?)');
       params.push(filters.tag);
     }
-    if (filters.mine === 'true') {
+    if (filters.mine === 'true' || filters.mine === '1') {
       where.push('q.created_by = ?');
       params.push(req.user!.id);
+    }
+    // Used by the examiner dashboard's data-quality check: questions stored without
+    // the explanation candidates see after release.
+    if (filters.missingExplanation === 'true') {
+      where.push("COALESCE(TRIM(q.explanation), '') = ''");
     }
     if (query.q) {
       where.push('(q.text LIKE ? OR q.topic LIKE ? OR q.explanation LIKE ?)');
