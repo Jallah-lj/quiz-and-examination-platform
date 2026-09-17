@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 
 import { api } from '../lib/api';
 import { formatRelative, initials } from '../lib/format';
+import { knownLink } from '../lib/links';
 import { useScrollLock } from '../lib/hooks';
 import type { NotificationRow, RoleCode } from '../types';
 import { Button, Loading, useToast } from './ui';
@@ -13,6 +14,7 @@ import {
   IconAudit,
   IconBank,
   IconBell,
+  IconChevronDown,
   IconBuilding,
   IconDashboard,
   IconExam,
@@ -108,7 +110,7 @@ function visibleSections(hasPermission: (...permissions: string[]) => boolean, r
 }
 
 export function AppLayout() {
-  const { user, logout, hasPermission } = useAuth();
+  const { user, logout, hasPermission, unreadNotifications } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -254,34 +256,73 @@ export function AppLayout() {
                 <strong>{user.fullName}</strong>
                 <small>{roleLabel}</small>
               </span>
+              <IconChevronDown size={15} className="account-button__chevron" />
             </button>
             {accountOpen ? (
-              <div className="menu-popover" role="menu">
-                <div className="menu-popover__header">
-                  <strong>{user.fullName}</strong>
-                  <span>{user.email}</span>
+              /*
+               * A dialog rather than an ARIA menu: the rows are ordinary buttons and links
+               * without arrow-key navigation, and the appearance choices are toggle buttons
+               * with their own pressed state, which a menu role would misrepresent.
+               */
+              <div className="menu-popover menu-popover--account" role="dialog" aria-label="Account menu">
+                <div className="account-popover__identity">
+                  <span className="avatar avatar--lg" aria-hidden="true">
+                    {initials(user.fullName)}
+                  </span>
+                  <span className="account-popover__identity-text">
+                    <strong title={user.fullName}>{user.fullName}</strong>
+                    <span className="account-popover__email" title={user.email}>
+                      {user.email}
+                    </span>
+                    <span className="account-popover__role">{roleLabel}</span>
+                  </span>
                 </div>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setAccountOpen(false);
-                    navigate('/profile');
-                  }}
-                >
-                  Profile &amp; password
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setAccountOpen(false);
-                    navigate('/notifications');
-                  }}
-                >
-                  Notifications
-                </button>
+
+                <div className="menu-popover__group">
+                  <button
+                    type="button"
+                    className="menu-item"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      navigate('/profile');
+                    }}
+                  >
+                    <IconUser size={17} />
+                    <span>Profile &amp; password</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="menu-item"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      navigate('/notifications');
+                    }}
+                  >
+                    <IconBell size={17} />
+                    <span>Notifications</span>
+                    {unreadNotifications > 0 ? (
+                      <span className="menu-item__badge">{unreadNotifications > 9 ? '9+' : unreadNotifications}</span>
+                    ) : (
+                      <span className="menu-item__meta">None new</span>
+                    )}
+                  </button>
+                </div>
+
                 <ThemeOptions />
+
+                <div className="menu-popover__group">
+                  <button
+                    type="button"
+                    className="menu-item menu-item--danger"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      void logout();
+                    }}
+                  >
+                    <IconLogout size={17} />
+                    <span>Sign out</span>
+                  </button>
+                </div>
               </div>
             ) : null}
           </div>
@@ -355,7 +396,9 @@ function NotificationsPanel({ onClose }: { onClose: () => void }) {
                 type="button"
                 onClick={() => {
                   if (!item.read_at) markRead.mutate(item.id);
-                  if (item.link) navigate(item.link);
+                  // A stored link can outlive the route it pointed at, so it is checked.
+                  const target = knownLink(item.link);
+                  if (target) navigate(target);
                   onClose();
                 }}
               >

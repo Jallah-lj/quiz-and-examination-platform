@@ -95,6 +95,20 @@ export const IconFlag = (p: IconProps) => (
 );
 export const IconChevronLeft = (p: IconProps) => (<Base {...p}><path d="M14 6l-6 6 6 6" /></Base>);
 export const IconChevronRight = (p: IconProps) => (<Base {...p}><path d="M10 6l6 6-6 6" /></Base>);
+
+export const IconChevronDown = (props: IconProps) => (
+  <Base {...props}>
+    <path d="m6 9 6 6 6-6" />
+  </Base>
+);
+
+export const IconMonitor = (props: IconProps) => (
+  <Base {...props}>
+    <rect x="3" y="4" width="18" height="13" rx="2" />
+    <path d="M8 21h8M12 17v4" />
+  </Base>
+);
+
 export const IconDownload = (p: IconProps) => (
   <Base {...p}><path d="M12 4v11" /><path d="M8 11l4 4 4-4" /><path d="M5 19h14" /></Base>
 );

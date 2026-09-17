@@ -4,12 +4,12 @@
  * never communicated by the icon or colour alone.
  */
 import { useTheme, type ThemePreference } from '../context/ThemeContext';
-import { IconMoon, IconSun } from './Icons';
+import { IconCheck, IconMonitor, IconMoon, IconSun } from './Icons';
 
-const OPTIONS: { value: ThemePreference; label: string }[] = [
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-  { value: 'system', label: 'Match system' },
+const OPTIONS: { value: ThemePreference; label: string; icon: typeof IconSun }[] = [
+  { value: 'light', label: 'Light', icon: IconSun },
+  { value: 'dark', label: 'Dark', icon: IconMoon },
+  { value: 'system', label: 'Match system', icon: IconMonitor },
 ];
 
 export function ThemeToggleButton() {
@@ -29,16 +29,23 @@ export function ThemeOptions() {
       <span className="menu-popover__group-label">Appearance</span>
       {OPTIONS.map((option) => {
         const selected = preference === option.value;
+        const Icon = option.icon;
         return (
           <button
             key={option.value}
             type="button"
-            className={`menu-popover__option ${selected ? 'is-selected' : ''}`}
+            className={`menu-item ${selected ? 'is-selected' : ''}`}
             aria-pressed={selected}
             onClick={() => setPreference(option.value)}
           >
+            <Icon size={17} />
             <span>{option.label}</span>
-            {selected ? <span className="menu-popover__check">Selected</span> : null}
+            {selected ? (
+              <span className="menu-item__selected">
+                <IconCheck size={15} />
+                Selected
+              </span>
+            ) : null}
           </button>
         );
       })}

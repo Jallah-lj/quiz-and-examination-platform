@@ -420,6 +420,8 @@ a:hover { text-decoration: underline; }
   color: var(--ink-700);
 }
 .account-menu__button:hover { background: var(--ink-50); }
+.account-button__chevron { color: var(--ink-400); transition: transform 0.15s ease; flex: 0 0 auto; }
+.account-button[aria-expanded='true'] .account-button__chevron { transform: rotate(180deg); }
 
 .avatar {
   width: 30px;
@@ -1502,6 +1504,105 @@ table.data-table {
   overflow: hidden;
 }
 .menu-popover--wide { width: min(380px, calc(100vw - 2rem)); }
+
+/*
+ * Account menu. The panel is padded and its rows are inset with their own radius, so the
+ * hover and selected tints stop short of the border instead of bleeding to the edges. The
+ * identity block leads it, the destructive action sits last behind a separator.
+ */
+.menu-popover--account {
+  width: min(320px, calc(100vw - 1.5rem));
+  padding: 0.4rem;
+  border-radius: var(--radius-lg);
+  animation: menu-popover-in 0.13s ease-out;
+}
+@keyframes menu-popover-in {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: none; }
+}
+
+.account-popover__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem 0.65rem;
+  margin-bottom: 0.15rem;
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+}
+.account-popover__identity-text { display: flex; flex-direction: column; min-width: 0; gap: 0.05rem; }
+.account-popover__identity-text strong {
+  font-size: 0.92rem;
+  color: var(--ink-900);
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-popover__email {
+  font-size: 0.78rem;
+  color: var(--ink-500);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-popover__role { font-size: 0.72rem; font-weight: 600; color: var(--accent-text); }
+
+/*
+ * One row of a menu: icon, label, optional trailing value. Shared by the account actions
+ * and the appearance choice so both read as the same control.
+ */
+.menu-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  font-size: 0.87rem;
+  color: var(--ink-700);
+  text-align: left;
+  cursor: pointer;
+}
+.menu-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-item svg { color: var(--ink-400); flex: 0 0 auto; }
+.menu-item:hover { background: var(--ink-50); color: var(--ink-900); }
+.menu-item:hover svg { color: var(--ink-600); }
+.menu-item:focus-visible { background: var(--ink-50); }
+.menu-item.is-selected { background: var(--tint-selected); color: var(--accent-text); font-weight: 600; }
+.menu-item.is-selected svg { color: var(--accent-text); }
+.menu-item--danger { color: var(--red-700); }
+.menu-item--danger svg { color: var(--red-600); }
+.menu-item--danger:hover { background: var(--tint-danger); color: var(--red-700); }
+.menu-item--danger:hover svg { color: var(--red-700); }
+.menu-item__selected {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent-text);
+}
+.menu-item__selected svg { color: var(--accent-text); }
+.menu-item__badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--red-600);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+.menu-item__meta { font-size: 0.74rem; color: var(--ink-400); }
 .menu-popover__header {
   padding: 0.7rem 0.9rem;
   border-bottom: 1px solid var(--border);
@@ -1528,34 +1629,18 @@ table.data-table {
 .menu-popover__danger { color: var(--red-700); }
 
 /* Appearance choice inside the account menu. */
-.menu-popover__group { padding: 0.35rem 0 0.4rem; border-top: 1px solid var(--border); }
+.menu-popover__group { padding: 0.3rem 0; border-top: 1px solid var(--border); }
+.menu-popover--account .menu-popover__group:first-of-type { border-top: 0; padding-top: 0.15rem; }
+.menu-popover--account .menu-popover__group { margin-top: 0.3rem; }
 .menu-popover__group-label {
   display: block;
-  padding: 0.35rem 0.9rem 0.2rem;
-  font-size: 0.72rem;
+  padding: 0.45rem 0.65rem 0.25rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.09em;
   color: var(--ink-500);
-  font-weight: 600;
+  font-weight: 700;
 }
-.menu-popover__option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.4rem 0.9rem;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 0.85rem;
-  color: var(--ink-700);
-  text-align: left;
-  cursor: pointer;
-}
-.menu-popover__option:hover { background: var(--ink-50); }
-.menu-popover__option.is-selected { color: var(--accent-text); font-weight: 600; background: var(--tint-selected); }
-.menu-popover__check { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
 
 .notification-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
 .notification-list li { border-bottom: 1px solid var(--ink-100); }
@@ -2650,6 +2735,7 @@ table.data-table {
   .attention-list__item { padding: 0.75rem 0.85rem; }
   .attention-list__item .btn { margin-left: 0; width: 100%; justify-content: center; }
   .menu-popover { width: min(268px, calc(100vw - 1.25rem)); }
+  .menu-popover--account { width: min(320px, calc(100vw - 1.5rem)); }
   .metric-list li { gap: 0.5rem; }
   .metric-list__bar { width: 56px; }
   .chart__bars { gap: 0.15rem; }
