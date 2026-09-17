@@ -504,7 +504,7 @@ router.get(
         ? {
             key: 'grading',
             severity: 'warning' as const,
-            title: `${gradingBacklog.ungraded_answers} written answer(s) awaiting your marking`,
+            title: `${gradingBacklog.ungraded_answers} written answer${gradingBacklog.ungraded_answers === 1 ? '' : 's'} awaiting your marking`,
             detail: gradingBacklog.oldest_submission
               ? `Oldest submission received ${gradingBacklog.oldest_submission.slice(0, 16).replace('T', ' ')} UTC.`
               : 'Results cannot be published until every written answer is marked.',
@@ -551,7 +551,7 @@ router.get(
         ? {
             key: 'explanations',
             severity: 'info' as const,
-            title: `${questionsMissingExplanation} of your questions have no explanation`,
+            title: `${questionsMissingExplanation} question${questionsMissingExplanation === 1 ? '' : 's'} without an explanation`,
             detail: 'Explanations are shown to candidates during review when the paper allows it.',
             link: '/questions?mine=true&missingExplanation=true',
           }
@@ -798,7 +798,7 @@ router.get(
         ? {
             key: 'grading',
             severity: 'warning' as const,
-            title: `${gradingBacklog.ungraded_answers} written answer(s) awaiting marking`,
+            title: `${gradingBacklog.ungraded_answers} written answer${gradingBacklog.ungraded_answers === 1 ? '' : 's'} awaiting marking`,
             detail:
               gradingBacklog.attempts > 0
                 ? `${gradingBacklog.attempts} submission(s) in review. Results stay withheld until every written answer is marked.`
