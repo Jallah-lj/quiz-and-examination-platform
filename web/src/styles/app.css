@@ -2110,12 +2110,29 @@ table.data-table {
 /* -------------------------------------------------------------------- charts */
 .chart--donut { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; }
 .chart-empty { color: var(--ink-500); font-size: 0.86rem; padding: 1.2rem 0; text-align: center; }
-.chart__bars { display: flex; align-items: flex-end; gap: 0.5rem; padding: 0.5rem 0 0; border-bottom: 1px solid var(--border); }
-.chart__column { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; min-width: 0; }
-.chart__bar { width: 100%; max-width: 46px; background: var(--navy-500); border-radius: 2px 2px 0 0; }
-.chart__value { font-size: 0.74rem; font-weight: 600; color: var(--ink-600); font-variant-numeric: tabular-nums; }
-.chart__label { font-size: 0.74rem; color: var(--ink-500); text-align: center; }
-.chart__svg { width: 100%; height: auto; }
+.chart__bars { display: flex; align-items: flex-end; gap: 0.25rem; padding: 0.5rem 0 0; border-bottom: 1px solid var(--border); }
+.chart__column { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; min-width: 0; }
+.chart__bar { width: 100%; min-width: 3px; max-width: 46px; background: var(--navy-500); border-radius: 2px 2px 0 0; }
+.chart__column:hover .chart__bar { filter: brightness(0.9); }
+.chart__value {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--ink-600);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.chart__label {
+  font-size: 0.7rem;
+  color: var(--ink-500);
+  text-align: center;
+  /* A date such as 08-19 must stay on one line, and the columns without a tick keep the
+     row height stable without printing anything. */
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.chart__value--hidden, .chart__label--hidden { visibility: hidden; }
+.chart__summary { margin: 0.55rem 0 0; font-size: 0.78rem; color: var(--ink-500); }
+.chart__svg { width: 100%; height: auto; display: block; }
 .chart__axis { font-size: 0.68rem; fill: var(--ink-500); }
 .chart__donut-value { font-size: 1.4rem; font-weight: 600; fill: var(--ink-900); }
 .chart__legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; flex: 1 1 200px; }

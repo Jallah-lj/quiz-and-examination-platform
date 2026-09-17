@@ -28,7 +28,6 @@ export default function PlatformDashboardPage() {
   const counts = data.counts;
   const failedLogins = data.loginActivity.reduce((sum, day) => sum + day.failed, 0);
   const successfulLogins = data.loginActivity.reduce((sum, day) => sum + day.successful, 0);
-  const totalAttempts = data.submissionsByDay.reduce((sum, day) => sum + day.submissions, 0);
   // Institutions ranked by the attempt volume recorded in the last 30 days.
   const activeInstitutions = [...data.institutionBreakdown]
     .sort((a, b) => b.attempts - a.attempts)
@@ -99,18 +98,27 @@ export default function PlatformDashboardPage() {
         <Card title="Submissions over time" description="Attempts submitted platform-wide over the last 30 days.">
           <BarChart
             ariaLabel="Submissions per day platform-wide over the last thirty days"
-            data={data.submissionsByDay.map((point) => ({ label: point.day.slice(5), value: point.submissions }))}
+            unit="submissions"
+            data={data.submissionsByDay.map((point) => ({
+              label: point.day.slice(5),
+              detail: point.day,
+              value: point.submissions,
+            }))}
           />
-          <p className="text-sm text-muted">{formatNumber(totalAttempts)} submissions in the last 30 days.</p>
         </Card>
         <Card title="Sign-in activity" description="Successful and failed sign-ins over the last 14 days.">
           <BarChart
             ariaLabel="Successful sign-ins per day over the last fourteen days"
-            data={data.loginActivity.map((day) => ({ label: day.day.slice(5), value: day.successful }))}
+            unit="successful sign-ins"
+            data={data.loginActivity.map((day) => ({
+              label: day.day.slice(5),
+              detail: day.day,
+              value: day.successful,
+            }))}
           />
           <p className="text-sm text-muted">
-            {successfulLogins} successful and {failedLogins} failed attempts. Repeated failures trigger the lockout policy and
-            are recorded in the audit log.
+            {successfulLogins} successful and {failedLogins} failed attempts in the last 14 days. Repeated failures trigger the
+            lockout policy and are recorded in the audit log.
           </p>
         </Card>
       </div>

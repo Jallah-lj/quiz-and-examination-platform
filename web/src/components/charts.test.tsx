@@ -1,0 +1,170 @@
+import { describe, expect, it } from 'vitest';
+import { render, screen, within } from '@testing-library/react';
+import { BarChart, LineChart, axisTickIndexes } from './charts';
+
+/** Thirty days, as the administrator and platform dashboards send them. */
+function dailySeries(count = 30) {
+  return Array.from({ length: count }, (_, index) => ({
+    label: `08-${String(index + 1).padStart(2, '0')}`,
+    detail: `2026-08-${String(index + 1).padStart(2, '0')}`,
+    value: index % 7,
+  }));
+}
+
+describe('axisTickIndexes', () => {
+  it('labels every point of a short series', () => {
+    expect(axisTickIndexes(5, 7)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('thins a long series down to the target and always labels the newest point', () => {
+    const ticks = axisTickIndexes(30, 7);
+    expect(ticks.length).toBeLessThanOrEqual(7);
+    expect(ticks[ticks.length - 1]).toBe(29);
+    // Ticks are evenly spaced and never adjacent, so the labels cannot collide.
+    const gaps = ticks.slice(1).map((tick, index) => tick - ticks[index]);
+    expect(new Set(gaps).size).toBe(1);
+    expect(gaps[0]).toBeGreaterThan(1);
+  });
+
+  it('returns nothing for an empty series', () => {
+    expect(axisTickIndexes(0)).toEqual([]);
+  });
+});
+
+describe('BarChart', () => {
+  it('prints a readable number of date labels on a thirty-day series', () => {
+    render(<BarChart ariaLabel="Submissions per day" unit="submissions" data={dailySeries(30)} />);
+
+    const chart = screen.getByRole('img', { name: 'Submissions per day' });
+    const labels = Array.from(chart.querySelectorAll('.chart__label')).filter(
+      (node) => !node.classList.contains('chart__label--hidden'),
+    );
+    // Six or seven ticks — not thirty overlapping timestamps.
+    expect(labels.length).toBeLessThanOrEqual(7);
+    expect(labels.length).toBeGreaterThanOrEqual(5);
+    for (const label of labels) {
+      expect(label.textContent).toMatch(/^08-\d{2}$/);
+    }
+    // The newest day is always labelled.
+    expect(labels[labels.length - 1].textContent).toBe('08-30');
+  });
+
+  it('keeps the numbers available when the columns are too narrow to print them', () => {
+    render(<BarChart ariaLabel="Submissions per day" unit="submissions" data={dailySeries(30)} />);
+
+    const chart = screen.getByRole('img', { name: 'Submissions per day' });
+    const inlineValues = Array.from(chart.querySelectorAll('.chart__value')).filter(
+      (node) => !node.classList.contains('chart__value--hidden'),
+    );
+    expect(inlineValues).toHaveLength(0);
+    // Every day is still reachable: a tooltip on the column and a table for screen readers.
+    const columns = chart.querySelectorAll('.chart__column');
+    expect(columns).toHaveLength(30);
+    expect(columns[5].getAttribute('title')).toBe('2026-08-06: 5 submissions');
+    const table = screen.getByRole('table', { name: 'Submissions per day' });
+    expect(within(table).getAllByRole('row')).toHaveLength(31);
+    expect(within(table).getByText('2026-08-30')).toBeInTheDocument();
+  });
+
+  it('prints a value for every bar once the columns are wide enough', () => {
+    render(<BarChart ariaLabel="Submissions per day" data={dailySeries(10)} />);
+
+    const chart = screen.getByRole('img', { name: 'Submissions per day' });
+    const inlineValues = Array.from(chart.querySelectorAll('.chart__value')).filter(
+      (node) => !node.classList.contains('chart__value--hidden'),
+    );
+    // Ten columns hold ten numbers; the dates are thinned to every other day.
+    expect(inlineValues).toHaveLength(10);
+    const labels = Array.from(chart.querySelectorAll('.chart__label')).filter(
+      (node) => !node.classList.contains('chart__label--hidden'),
+    );
+    expect(labels.map((node) => node.textContent)).toEqual(['08-02', '08-04', '08-06', '08-08', '08-10']);
+  });
+
+  it('thins the labels further on a narrow card and drops the numbers before they collide', () => {
+    // A phone-width card: 320px for thirty columns.
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      return { ...original.call(this), width: 320, height: 180, top: 0, left: 0, right: 320, bottom: 180, x: 0, y: 0 } as DOMRect;
+    };
+    try {
+      render(<BarChart ariaLabel="Submissions per day" unit="submissions" data={dailySeries(30)} />);
+      const chart = screen.getByRole('img', { name: 'Submissions per day' });
+      const labels = Array.from(chart.querySelectorAll('.chart__label')).filter(
+        (node) => !node.classList.contains('chart__label--hidden'),
+      );
+      expect(labels.length).toBeLessThanOrEqual(5);
+      expect(labels[labels.length - 1].textContent).toBe('08-30');
+      const inlineValues = Array.from(chart.querySelectorAll('.chart__value')).filter(
+        (node) => !node.classList.contains('chart__value--hidden'),
+      );
+      expect(inlineValues).toHaveLength(0);
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+    }
+  });
+
+  it('summarises the period from the real figures, and says so when nothing happened', () => {
+    render(<BarChart ariaLabel="Submissions per day" unit="submissions" data={dailySeries(30)} />);
+    // Four full 0+1+2+3+4+5+6 cycles plus 0 and 1 = 85; the peak of 6 first occurs on 08-07.
+    expect(screen.getByText('Peak 6 submissions on 2026-08-07 · 85 submissions in total.')).toBeInTheDocument();
+
+    render(
+      <BarChart
+        ariaLabel="Sign-ins per day"
+        unit="successful sign-ins"
+        data={[
+          { label: '08-01', detail: '2026-08-01', value: 0 },
+          { label: '08-02', detail: '2026-08-02', value: 0 },
+        ]}
+      />,
+    );
+    expect(screen.getByText('No activity was recorded in this period.')).toBeInTheDocument();
+  });
+
+  it('explains an empty series instead of rendering an empty frame', () => {
+    render(<BarChart ariaLabel="Submissions per day" data={[]} />);
+    expect(screen.getByText('No data recorded for this period yet.')).toBeInTheDocument();
+  });
+
+  it('survives a background refetch that returns an empty series', () => {
+    const { rerender } = render(<BarChart ariaLabel="Submissions per day" data={[]} />);
+    expect(screen.getByText('No data recorded for this period yet.')).toBeInTheDocument();
+    // Same component instance, new data: the hook order must not change.
+    rerender(<BarChart ariaLabel="Submissions per day" unit="submissions" data={dailySeries(30)} />);
+    const chart = screen.getByRole('img', { name: 'Submissions per day' });
+    expect(chart.querySelectorAll('.chart__column')).toHaveLength(30);
+    rerender(<BarChart ariaLabel="Submissions per day" data={[]} />);
+    expect(screen.getByText('No data recorded for this period yet.')).toBeInTheDocument();
+  });
+});
+
+describe('LineChart', () => {
+  it('labels the newest result and keeps a full accessible table', () => {
+    render(
+      <LineChart
+        ariaLabel="Score progression"
+        data={[
+          { label: '09-01', detail: 'Statistics CA (1 September 2026)', value: 42 },
+          { label: '09-08', detail: 'Data Structures quiz (8 September 2026)', value: 68 },
+          { label: '09-15', detail: 'Probability CA (15 September 2026)', value: 74 },
+        ]}
+      />,
+    );
+
+    const chart = screen.getByRole('img', { name: 'Score progression' });
+    expect(chart).toBeInTheDocument();
+    const ticks = Array.from(chart.querySelectorAll('text')).map((node) => node.textContent);
+    expect(ticks).toContain('09-15');
+    // The scale is stated, so bar and point heights have meaning.
+    for (const value of ['0', '25', '50', '75', '100']) expect(ticks).toContain(value);
+    const table = screen.getByRole('table', { name: 'Score progression' });
+    expect(within(table).getByText('Statistics CA (1 September 2026)')).toBeInTheDocument();
+    expect(within(table).getByText('74%')).toBeInTheDocument();
+  });
+
+  it('refuses to draw a trend from a single point', () => {
+    render(<LineChart ariaLabel="Score progression" data={[{ label: '09-01', value: 42 }]} />);
+    expect(screen.getByText('Not enough released results to draw a trend yet.')).toBeInTheDocument();
+  });
+});

@@ -49,7 +49,12 @@ function StudentDashboard() {
   const deadlineExam = data.nextDeadline
     ? data.availableExams.find((exam) => exam.id === data.nextDeadline?.id && exam.in_progress === 0)
     : undefined;
-  const trend = data.scoreTrend.map((point) => ({ label: point.label, value: point.percentage }));
+  // The axis shows short dates; the tooltip and the accessible table keep the full record.
+  const trend = data.scoreTrend.map((point) => ({
+    label: point.label,
+    detail: `${point.paper_title} (${formatDate(point.at)})`,
+    value: point.percentage,
+  }));
 
   const startExam = (exam: StudentDashboardData['availableExams'][number]) =>
     setTarget({
@@ -567,7 +572,12 @@ function TeacherDashboard() {
         <Card title="Submissions received" description="Attempts submitted to your papers over the last 14 days.">
           <BarChart
             ariaLabel="Submissions per day over the last two weeks"
-            data={data.weeklyActivity.map((point) => ({ label: point.day.slice(5), value: point.submissions }))}
+            unit="submissions"
+            data={data.weeklyActivity.map((point) => ({
+              label: point.day.slice(5),
+              detail: point.day,
+              value: point.submissions,
+            }))}
           />
         </Card>
         <Card title="Question bank mix" description="Active questions you can draw on, by difficulty.">
@@ -841,7 +851,12 @@ function AdminDashboardView() {
         <Card title="Submissions over time" description="Attempts submitted each day over the last 30 days.">
           <BarChart
             ariaLabel="Submissions per day over the last thirty days"
-            data={data.submissionsByDay.map((point) => ({ label: point.day.slice(5), value: point.submissions }))}
+            unit="submissions"
+            data={data.submissionsByDay.map((point) => ({
+              label: point.day.slice(5),
+              detail: point.day,
+              value: point.submissions,
+            }))}
           />
         </Card>
         <Card title="Grade distribution" description="Released results grouped by awarded grade.">
