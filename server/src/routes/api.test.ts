@@ -749,6 +749,42 @@ describe('role dashboards', () => {
     expect(forbidden.status).toBe(403);
   });
 
+  it('makes an institution explicit for platform staff instead of reporting zeros', async () => {
+    const platform = await harness.login('platform@examsys.test');
+
+    // A platform administrator has no institution of their own: an unscoped institution
+    // dashboard must say so rather than render a page of zeros.
+    const unscoped = await platform.get('/api/dashboard/admin');
+    expect(unscoped.status).toBe(422);
+    expect(unscoped.body.error.message).toMatch(/select an institution/i);
+    expect((await platform.get('/api/dashboard/teacher')).status).toBe(422);
+
+    // Naming a real institution returns that institution's records.
+    const scoped = await platform.get(`/api/dashboard/admin?institutionId=${fixture.institutionId}`);
+    expect(scoped.status).toBe(200);
+    expect(scoped.body.data.counts.students).toBe(2);
+    expect(scoped.body.data.counts.exams).toBe(1);
+    expect(scoped.body.data.pipeline ?? scoped.body.data.examPipeline).toBeTruthy();
+
+    // The other tenant is available too, and unknown ids are rejected clearly.
+    const other = await platform.get(`/api/dashboard/admin?institutionId=${fixture.otherInstitutionId}`);
+    expect(other.status).toBe(200);
+    expect(other.body.data.counts.students).toBe(1);
+    expect((await platform.get('/api/dashboard/admin?institutionId=9999')).status).toBe(404);
+    expect((await platform.get('/api/dashboard/admin?institutionId=abc')).status).toBe(422);
+  });
+
+  it('pins institution staff to their own institution', async () => {
+    const admin = await harness.login('admin@alpha.test');
+    expect((await admin.get(`/api/dashboard/admin?institutionId=${fixture.institutionId}`)).status).toBe(200);
+    // Asking for a different tenant is refused rather than silently ignored.
+    const foreign = await admin.get(`/api/dashboard/admin?institutionId=${fixture.otherInstitutionId}`);
+    expect(foreign.status).toBe(403);
+    expect(foreign.body.error.message).toMatch(/your own institution/i);
+    // The teacher dashboard follows the same rule.
+    expect((await admin.get(`/api/dashboard/teacher?institutionId=${fixture.otherInstitutionId}`)).status).toBe(403);
+  });
+
   it('filters the question bank to questions stored without an explanation', async () => {
     const teacher = await harness.login('teacher@alpha.test');
     const author = { questionBankId: fixture.bankId, subjectId: fixture.subjectId, type: 'MCQ', marks: 2 };

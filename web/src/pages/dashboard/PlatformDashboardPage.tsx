@@ -1,11 +1,13 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { formatDateTime, formatNumber, titleCase } from '../../lib/format';
-import { Badge, Card, DataTable, Loading, PageHeader, ProgressBar, StatCard } from '../../components/ui';
+import { Badge, Card, DataTable, Loading, PageHeader, ProgressBar, SelectInput, StatCard } from '../../components/ui';
 import { ErrorState } from '../../components/StatusPages';
 import { BarChart } from '../../components/charts';
 import { AttentionPanel, MetricList, StatDelta } from '../../components/dashboard';
+import { InstitutionDashboardView } from './InstitutionDashboardView';
 import type { PlatformDashboard } from '../../types';
 
 const ACCOUNT_STATUS_LABELS: Record<string, string> = {
@@ -16,6 +18,8 @@ const ACCOUNT_STATUS_LABELS: Record<string, string> = {
 };
 
 export default function PlatformDashboardPage() {
+  // Which tenant, if any, the platform administrator is currently inspecting.
+  const [inspectedId, setInspectedId] = useState<number | null>(null);
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['dashboard', 'platform'],
     queryFn: () => api.get<PlatformDashboard>('/dashboard/platform'),
@@ -37,6 +41,10 @@ export default function PlatformDashboardPage() {
       value: institution.attempts,
       meta: `${institution.students} candidates · ${institution.teachers} examiners`,
     }));
+
+  // The internal platform office is not a tenant, so it is not offered for inspection.
+  const tenants = data.institutionBreakdown.filter((institution) => institution.code !== 'PLATFORM');
+  const inspected = tenants.find((institution) => institution.id === inspectedId) ?? null;
 
   return (
     <div className="page">
@@ -203,9 +211,45 @@ export default function PlatformDashboardPage() {
                 </div>
               ),
             },
-          ]}
+                        {
+                key: 'inspect',
+                header: '',
+                align: 'right',
+                render: (row) => (
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    aria-label={`Open the dashboard for ${row.name}`}
+                    onClick={() => setInspectedId(row.id)}
+                  >
+                    Dashboard
+                  </button>
+                ),
+              },
+]}
         />
       </Card>
+
+      <Card
+        title="Institution dashboard"
+        description="Institution-scoped figures below are aggregated from that institution's own records. A platform administrator holds no institution of their own, so one has to be chosen explicitly."
+      >
+        <SelectInput
+          label="Institution"
+          value={inspectedId === null ? '' : String(inspectedId)}
+          onChange={(event) => setInspectedId(event.target.value ? Number(event.target.value) : null)}
+          options={tenants.map((institution) => ({
+            value: String(institution.id),
+            label: `${institution.name} (${institution.code})`,
+          }))}
+          placeholder="Select an institution to inspect"
+          hint="Nothing is shown until an institution is selected."
+        />
+      </Card>
+
+      {inspected ? (
+        <InstitutionDashboardView institutionId={inspected.id} heading={inspected.name} onBack={() => setInspectedId(null)} />
+      ) : null}
 
       <Card
         title="Latest platform activity"

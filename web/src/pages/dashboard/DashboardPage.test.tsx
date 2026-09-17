@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import DashboardPage from './DashboardPage';
@@ -424,6 +425,73 @@ describe('examiner dashboard', () => {
     expect(screen.getByText('Closing within 24 hours')).toBeInTheDocument();
   });
 });
+
+  it('drills into one institution on request instead of showing a page of zeros', async () => {
+    // The unscoped institution endpoint answers 422 for platform staff; if this page ever
+    // requests it while nothing is selected, the drill-through is broken.
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes('/api/dashboard/platform')) {
+        return new Response(JSON.stringify({ data: platformPayload() }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/dashboard/admin')) {
+        return url.includes('institutionId=2')
+          ? new Response(JSON.stringify({ data: adminPayload() }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            })
+          : new Response(
+              JSON.stringify({
+                error: {
+                  code: 'UNPROCESSABLE',
+                  message: 'Select an institution to view its dashboard.',
+                },
+              }),
+              { status: 422, headers: { 'content-type': 'application/json' } },
+            );
+      }
+      return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: url } }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
+    });
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/platform']}>
+          <PlatformDashboardPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const picker = await screen.findByLabelText('Institution');
+    expect(screen.getByText(/Nothing is shown until an institution is selected/i)).toBeInTheDocument();
+    // Nothing institution-scoped is fetched until a tenant is chosen.
+    expect(calls.some((url) => url.includes('/api/dashboard/admin'))).toBe(false);
+
+    await user.selectOptions(picker, '2');
+
+    // Real figures from the selected tenant, aggregated server-side.
+    expect(await screen.findByText('Papers without questions')).toBeInTheDocument();
+    expect(screen.getByText('1 paper(s) without questions')).toBeInTheDocument();
+    expect(screen.getByText(/Up 50% versus the previous last 14 days/)).toBeInTheDocument();
+    expect(calls.some((url) => url.includes('/api/dashboard/admin?institutionId=2'))).toBe(true);
+
+    // Returning to the overview clears the tenant view again.
+    await user.click(screen.getByRole('button', { name: /back to platform overview/i }));
+    await waitFor(() => expect(screen.queryByText('Papers without questions')).not.toBeInTheDocument());
+    expect(calls.filter((url) => url.includes('/api/dashboard/admin') && !url.includes('institutionId=2'))).toEqual([]);
+  });
 
 describe('platform dashboard', () => {
   afterEach(() => {

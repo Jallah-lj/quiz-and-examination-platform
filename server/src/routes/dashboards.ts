@@ -5,7 +5,7 @@
 import { Router } from 'express';
 import { getDb } from '../db';
 import { asyncHandler, ok } from '../lib/http';
-import { forbidden } from '../lib/errors';
+import { forbidden, notFound, unprocessable, validationError } from '../lib/errors';
 import type { AuthedRequest } from '../types';
 import { requireAuth, requirePermission } from '../middleware/auth';
 import { addDays, nowIso } from '../lib/time';
@@ -41,6 +41,38 @@ function fillDailySeries(
     series.push(byDay.get(day) ?? { day, ...emptyColumns });
   }
   return series;
+}
+
+/**
+ * Institution scope for the institution-scoped dashboards.
+ *
+ * Platform staff hold no institution of their own, so a dashboard that silently scoped
+ * them to "no institution" would render a full page of zeros. They must name the tenant
+ * they want to inspect; everyone else is pinned to their own institution.
+ */
+function resolveInstitutionScope(req: AuthedRequest): number {
+  const requested = req.query.institutionId ? Number(req.query.institutionId) : null;
+  if (requested !== null && (!Number.isInteger(requested) || requested <= 0)) {
+    throw validationError('institutionId must be a positive integer.');
+  }
+
+  if (req.user!.roleCode === 'super_admin') {
+    if (requested === null) {
+      throw unprocessable(
+        'Select an institution to view its dashboard. Platform administrators are not scoped to a single institution.',
+      );
+    }
+    const exists = getDb().prepare('SELECT id FROM institutions WHERE id = ?').get(requested);
+    if (!exists) throw notFound('Institution not found.');
+    return requested;
+  }
+
+  const own = req.user!.institutionId;
+  if (!own) throw forbidden('No institution is linked to this account.');
+  if (requested !== null && requested !== own) {
+    throw forbidden('You can only view your own institution dashboard.');
+  }
+  return own;
 }
 
 /** Percentage change between two periods; null when the previous period was empty. */
@@ -311,9 +343,7 @@ router.get(
   requirePermission('exam.view', 'grading.grade'),
   asyncHandler(async (req: AuthedRequest, res) => {
     const db = getDb();
-    const institutionId = req.user!.institutionId;
-    if (!institutionId && req.user!.roleCode !== 'super_admin') throw forbidden();
-    const scope = institutionId ?? -1;
+    const scope = resolveInstitutionScope(req);
     const userId = req.user!.id;
     const now = nowIso();
     const weekAhead = addDays(now, 7);
@@ -584,9 +614,7 @@ router.get(
   requirePermission('student.view', 'exam.view', 'result.view.any'),
   asyncHandler(async (req: AuthedRequest, res) => {
     const db = getDb();
-    const institutionId = req.user!.institutionId;
-    if (!institutionId && req.user!.roleCode !== 'super_admin') throw forbidden();
-    const scope = institutionId ?? -1;
+    const scope = resolveInstitutionScope(req);
     const now = nowIso();
 
     const counts = db
@@ -867,6 +895,8 @@ router.get(
       counts,
       passRate: {
         ...passRate,
+        passed: passRate.passed ?? 0,
+        failed: passRate.failed ?? 0,
         passRate:
           passRate.graded > 0 ? Math.round((passRate.passed / passRate.graded) * 10000) / 100 : 0,
       },
