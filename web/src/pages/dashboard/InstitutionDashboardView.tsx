@@ -5,7 +5,7 @@ import { api } from '../../lib/api';
 import { formatDateTime, formatPercentage, formatRelative } from '../../lib/format';
 import { Badge, Button, Card, DataTable, Loading, PageHeader, ProgressBar, StatCard, StatusBadge } from '../../components/ui';
 import { ErrorState } from '../../components/StatusPages';
-import { BarChart, DonutChart } from '../../components/charts';
+import { DonutChart, TrendChart } from '../../components/charts';
 import { AttentionPanel, PipelineStrip, StatDelta } from '../../components/dashboard';
 import type { AdminDashboard } from '../../types';
 
@@ -140,7 +140,7 @@ export function InstitutionDashboardView({
           title="Submissions over time"
           description="Attempts submitted each day over the last 30 days."
         >
-          <BarChart
+          <TrendChart
             ariaLabel="Submissions per day over the last thirty days"
             unit="submissions"
             data={data.submissionsByDay.map((point) => ({

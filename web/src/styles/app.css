@@ -2466,21 +2466,96 @@ table.data-table {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 0.4rem 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
+  gap: 0.15rem 1.1rem;
   align-content: center;
   min-width: 0;
 }
+/*
+ * A legend row is swatch · name · share bar · figures. The bar is what makes the key
+ * readable at a glance: sizes are compared directly instead of through percentages.
+ */
 .chart__legend li {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(1.6rem, auto) minmax(2.5rem, 1fr) auto;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.85rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: var(--radius);
+  transition: background-color 120ms ease;
 }
+.chart__legend li.is-active { background: var(--ink-50); }
 .chart__swatch { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; }
-.chart__legend-label { min-width: 0; overflow-wrap: anywhere; color: var(--ink-600); }
+.chart__legend-label { min-width: 0; overflow-wrap: anywhere; color: var(--ink-600); font-weight: 600; }
 .chart__legend-value { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chart__legend-bar {
+  display: block;
+  height: 6px;
+  min-width: 2.5rem;
+  border-radius: 999px;
+  background: var(--ink-100);
+  overflow: hidden;
+}
+.chart__legend-fill { display: block; height: 100%; border-radius: 999px; }
+.chart__legend-fill--default { background: var(--chart-1); }
+.chart__legend-fill--accent { background: var(--chart-2); }
+.chart__legend-fill--success { background: var(--chart-3); }
+.chart__legend-fill--warning { background: var(--chart-4); }
+.chart__legend-fill--danger { background: var(--chart-5); }
+.chart__legend-fill--neutral { background: var(--chart-6); }
+/* Pointing at a row lights its slice and lets the rest recede, so the two agree. */
+.chart__segment { transition: opacity 120ms ease; }
+.chart__segment.is-dimmed { opacity: 0.3; }
+
+/*
+ * Trend panel: a smooth line over a soft fill, with the reading aids a modern analytics
+ * panel uses — a whole-number scale, a marked peak, and a crosshair with a card that
+ * follow whichever day the pointer or the arrow keys are on. Nothing moves on its own;
+ * the two short transitions are hover responses and both are neutralised by the
+ * reduced-motion rule.
+ */
+.chart--trend { display: block; }
+.trend { position: relative; }
+.trend__svg { overflow: visible; }
+.trend__svg:focus-visible { outline-offset: 4px; }
+.trend__hit { fill: transparent; cursor: crosshair; }
+.trend__guide { stroke: var(--chart-grid-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.trend__point { fill: var(--chart-line); }
+.trend__point--peak { stroke: var(--surface); stroke-width: 2; }
+.trend__point--active { fill: var(--accent-text); stroke: var(--surface); stroke-width: 2; }
+.trend__peak {
+  font-size: 0.72rem;
+  font-weight: 600;
+  fill: var(--ink-700);
+  font-variant-numeric: tabular-nums;
+}
+.trend__tooltip {
+  position: absolute;
+  top: 0;
+  min-width: 6.5rem;
+  z-index: 2;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.35rem 0.55rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.trend__tooltip strong {
+  font-size: 0.9rem;
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+.trend__tooltip span { font-size: 0.72rem; color: var(--ink-500); font-variant-numeric: tabular-nums; }
+/* The scale is dashed so the ink stays clearly behind the data. */
+.chart__grid-line--soft { stroke-dasharray: 4 4; }
+.chart__line--smooth { stroke-linejoin: round; stroke-linecap: round; }
 
 /* --------------------------------------------------- notifications full page */
 .notification-page-list { list-style: none; margin: 0; padding: 0; }
@@ -2742,6 +2817,10 @@ table.data-table {
   .chart__column { gap: 0.15rem; }
   .chart--donut { grid-template-columns: minmax(0, 1fr); justify-items: center; }
   .chart--donut .chart__legend { width: 100%; }
+  /* One row per band: a share bar squeezed beside a long label is unreadable. */
+  .chart__legend { grid-template-columns: minmax(0, 1fr); }
+  .chart__legend-bar { min-width: 2rem; }
+  .trend__tooltip { max-width: 12rem; }
   .pipeline { gap: 0.35rem; }
   .pipeline__stage { padding: 0.5rem 0.25rem; }
   .check-list__item { padding: 0.5rem 0.85rem; }

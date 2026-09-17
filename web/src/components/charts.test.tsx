@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
-import { BarChart, DonutChart, LineChart, axisTickIndexes, distinctTones } from './charts';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { BarChart, DonutChart, LineChart, TrendChart, axisTickIndexes, distinctTones, niceScale } from './charts';
 
 /** Pretend the panel is a given number of CSS pixels wide, as a real layout would. */
 function withPanelWidth(width: number) {
@@ -184,6 +185,153 @@ describe('LineChart', () => {
   });
 });
 
+describe('niceScale', () => {
+  it('breaks a count series into whole numbers that clear the peak', () => {
+    expect(niceScale(14)).toEqual({ max: 15, ticks: [0, 5, 10, 15] });
+    expect(niceScale(3)).toEqual({ max: 3, ticks: [0, 1, 2, 3] });
+    expect(niceScale(53)).toEqual({ max: 60, ticks: [0, 20, 40, 60] });
+  });
+
+  it('stays sane when nothing has been recorded', () => {
+    expect(niceScale(0)).toEqual({ max: 1, ticks: [0, 1] });
+  });
+});
+
+describe('TrendChart', () => {
+  /**
+   * The real shape of the institution series: a quiet stretch, then activity with a peak
+   * on the second-to-last day.
+   */
+  const quiet = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 3, 0, 0, 0, 0, 2, 8, 5, 8, 14, 6];
+  const series = (values: number[] = quiet) =>
+    values.map((value, index) => ({
+      label: `09-${String(index + 1).padStart(2, '0')}`,
+      detail: `2026-09-${String(index + 1).padStart(2, '0')}`,
+      value,
+    }));
+
+  const coordinates = (path: string) => {
+    const ys = Array.from(path.matchAll(/[-\d.]+,([-\d.]+)/g)).map((match) => Number(match[1]));
+    const xs = Array.from(path.matchAll(/([-\d.]+),[-\d.]+/g)).map((match) => Number(match[1]));
+    return { ys, xs };
+  };
+
+  it('scales the axis in whole numbers and marks the busiest day', () => {
+    render(<TrendChart ariaLabel="Submissions per day" unit="submissions" data={series()} />);
+    const svg = screen.getByRole('img', { name: 'Submissions per day' });
+    const labels = Array.from(svg.querySelectorAll('text')).map((node) => node.textContent);
+
+    // The scale brackets the peak of 14 without printing fractions of a submission.
+    for (const tick of ['0', '5', '10', '15']) expect(labels).toContain(tick);
+    // The busy day is marked and labelled; the thinned axis still ends on the newest day.
+    expect(labels[labels.length - 1]).toBe('09-30');
+    expect(svg.querySelector('.trend__peak')?.textContent).toBe('14');
+    expect(svg.querySelectorAll('.trend__point--peak')).toHaveLength(1);
+  });
+
+  it('never draws the line below the zero baseline, even beside a spike', () => {
+    // A curve through 0 → 9 → 0 without clamping bows underneath the baseline.
+    render(<TrendChart ariaLabel="Spiky" data={series([0, 0, 9, 0, 0, 12, 0, 0, 0, 0])} />);
+    const svg = screen.getByRole('img', { name: 'Spiky' });
+    const zeroTick = Array.from(svg.querySelectorAll('text')).find((node) => node.textContent === '0')!;
+    const baseline = Number(zeroTick.getAttribute('y')) - 3.5;
+
+    for (const path of ['chart__line', 'chart__area']) {
+      const { ys } = coordinates(svg.querySelector(`.${path}`)!.getAttribute('d')!);
+      expect(Math.max(...ys)).toBeLessThanOrEqual(baseline + 0.5);
+      expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('reads out the day under the pointer, with a guide line', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <TrendChart ariaLabel="Submissions per day" unit="submissions" data={series()} />,
+    );
+    const svg = screen.getByRole('img', { name: 'Submissions per day' });
+
+    expect(container.querySelector('.trend__tooltip')).toBeNull();
+    await user.hover(svg.querySelectorAll('.trend__hit')[28] as Element);
+    const tooltip = container.querySelector('.trend__tooltip')!;
+    expect(tooltip.textContent).toBe('14 submissions2026-09-29');
+    expect(svg.querySelector('.trend__guide')).toBeTruthy();
+    expect(svg.querySelectorAll('.trend__point--active')).toHaveLength(1);
+
+    await user.unhover(svg.querySelectorAll('.trend__hit')[28] as Element);
+    expect(container.querySelector('.trend__tooltip')).toBeNull();
+    expect(svg.querySelector('.trend__guide')).toBeNull();
+  });
+
+  it('can be stepped through with the keyboard, and left with Escape', () => {
+    const { container } = render(
+      <TrendChart ariaLabel="Submissions per day" unit="submissions" data={series()} />,
+    );
+    const svg = screen.getByRole('img', { name: 'Submissions per day' });
+    // Reachable by keyboard, not only by pointer (jsdom does not focus SVG itself).
+    expect(svg.getAttribute('tabindex')).toBe('0');
+    fireEvent.focus(svg);
+    // Focusing reads the newest day straight away.
+    expect(container.querySelector('.trend__tooltip')?.textContent).toBe('6 submissions2026-09-30');
+
+    for (const [key, expected] of [
+      ['ArrowLeft', '14 submissions2026-09-29'],
+      ['Home', '0 submissions2026-09-01'],
+      ['End', '6 submissions2026-09-30'],
+    ] as const) {
+      fireEvent.keyDown(svg, { key });
+      expect(container.querySelector('.trend__tooltip')?.textContent).toBe(expected);
+    }
+    fireEvent.keyDown(svg, { key: 'Escape' });
+    expect(container.querySelector('.trend__tooltip')).toBeNull();
+  });
+
+  it('keeps the readout inside the panel at both ends of the series', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <TrendChart ariaLabel="Submissions per day" unit="submissions" data={series()} />,
+    );
+    const svg = screen.getByRole('img', { name: 'Submissions per day' });
+    const hits = svg.querySelectorAll('.trend__hit');
+    const left = () => Number.parseFloat((container.querySelector('.trend__tooltip') as HTMLElement).style.left);
+
+    await user.hover(hits[0] as Element);
+    expect(left()).toBeGreaterThanOrEqual(64);
+    await user.unhover(hits[0] as Element);
+    await user.hover(hits[hits.length - 1] as Element);
+    // 560px wide, so the newest day's card is pulled back from the right edge.
+    expect(left()).toBeLessThanOrEqual(560 - 64);
+  });
+
+  it('keeps every day in the accessible table, and marks only the days worth marking', () => {
+    render(<TrendChart ariaLabel="Submissions per day" unit="submissions" data={series()} />);
+    const table = screen.getByRole('table', { name: 'Submissions per day' });
+    expect(within(table).getAllByRole('row')).toHaveLength(31);
+    expect(within(table).getByText('2026-09-29')).toBeInTheDocument();
+
+    // The busiest day and the newest day, and nothing that would read as a dashed rule.
+    const svg = screen.getByRole('img', { name: 'Submissions per day' });
+    expect(svg.querySelectorAll('.trend__point')).toHaveLength(2);
+    // Each day still has its own target for the pointer.
+    expect(svg.querySelectorAll('.trend__hit')).toHaveLength(30);
+  });
+
+  it('says so when the period was quiet, and asks for two points to draw a trend', () => {
+    const flat = render(<TrendChart ariaLabel="Quiet" data={series([0, 0, 0, 0])} />);
+    expect(flat.container.textContent).toBe('No activity was recorded in this period.');
+    flat.unmount();
+
+    const single = render(<TrendChart ariaLabel="One day" data={series([3])} />);
+    expect(single.container.textContent).toBe('Not enough data points to draw a trend yet.');
+  });
+
+  it('summarises the peak and the daily average from the series itself', () => {
+    render(<TrendChart ariaLabel="Submissions per day" unit="submissions" data={series()} />);
+    expect(
+      screen.getByText('Peak 14 submissions on 2026-09-29 · 1.8 submissions a day on average.'),
+    ).toBeInTheDocument();
+  });
+});
+
 describe('chart panels fit the space they are given', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -288,6 +436,49 @@ describe('distribution rings', () => {
       0,
     );
     expect(drawn).toBeCloseTo(circumference, 4);
+  });
+});
+
+describe('distribution legend', () => {
+  const withEmpty = [
+    { label: 'C', value: 2 },
+    { label: 'D', value: 6 },
+    { label: 'F', value: 2, tone: 'danger' },
+    { label: 'A', value: 0 },
+  ];
+
+  it('sizes each row bar from the share it stands for, and leaves an empty band blank', () => {
+    const { container } = render(<DonutChart ariaLabel="Grade distribution" data={withEmpty} />);
+    const rows = Array.from(container.querySelectorAll('.chart__legend li'));
+
+    expect(rows.map((row) => (row.querySelector('.chart__legend-fill') as HTMLElement).style.width)).toEqual([
+      '20%',
+      '60%',
+      '20%',
+      '0%',
+    ]);
+    // The figures are printed as well, so the bar is never the only carrier.
+    expect(rows[1].textContent).toBe('D6 (60%)');
+    expect(rows[3].textContent).toBe('A0 (0%)');
+    // A blank band draws no bar at all.
+    expect((rows[3].querySelector('.chart__legend-fill') as HTMLElement).style.width).toBe('0%');
+  });
+
+  it('lights the matching arc while a legend row is under the pointer', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<DonutChart ariaLabel="Grade distribution" data={withEmpty} />);
+    const rows = container.querySelectorAll('.chart__legend li');
+    const arcs = () => Array.from(container.querySelectorAll('.chart__segment'));
+
+    expect(arcs().filter((arc) => arc.classList.contains('is-dimmed'))).toHaveLength(0);
+
+    await user.hover(rows[1]);
+    expect(rows[1].classList.contains('is-active')).toBe(true);
+    const dimmed = arcs().map((arc) => arc.classList.contains('is-dimmed'));
+    expect(dimmed).toEqual([true, false, true, true]);
+
+    await user.unhover(rows[1]);
+    expect(arcs().filter((arc) => arc.classList.contains('is-dimmed'))).toHaveLength(0);
   });
 });
 

@@ -5,7 +5,7 @@ import { api } from '../../lib/api';
 import { formatDateTime, formatNumber, titleCase } from '../../lib/format';
 import { Badge, Card, DataTable, Loading, PageHeader, ProgressBar, SelectInput, StatCard } from '../../components/ui';
 import { ErrorState } from '../../components/StatusPages';
-import { BarChart } from '../../components/charts';
+import { BarChart, TrendChart } from '../../components/charts';
 import { AttentionPanel, MetricList, StatDelta } from '../../components/dashboard';
 import { InstitutionDashboardView } from './InstitutionDashboardView';
 import type { PlatformDashboard } from '../../types';
@@ -104,7 +104,7 @@ export default function PlatformDashboardPage() {
 
       <div className="split-2">
         <Card title="Submissions over time" description="Attempts submitted platform-wide over the last 30 days.">
-          <BarChart
+          <TrendChart
             ariaLabel="Submissions per day platform-wide over the last thirty days"
             unit="submissions"
             data={data.submissionsByDay.map((point) => ({
