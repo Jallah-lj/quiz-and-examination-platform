@@ -15,6 +15,9 @@ function passRate(passed: number, graded: number): number | null {
   return Math.round((passed / graded) * 10000) / 100;
 }
 
+/** Grade codes that mean a fail on any scale the platform seeds or accepts. */
+const FAILING_GRADES = ['F', 'FAIL', 'FAILED'];
+
 /**
  * Institution dashboard, shared by institution administrators (their own institution) and
  * platform administrators (whichever institution they selected).
@@ -142,7 +145,9 @@ export function InstitutionDashboardView({
             data={data.gradeDistribution.map((point) => ({
               label: point.grade,
               value: point.count,
-              tone: ['A+', 'A', 'B'].includes(point.grade) ? 'success' : point.grade === 'F' ? 'danger' : 'default',
+              // A failing band is always red; the chart gives every other band its own
+              // colour, so two grades are never drawn as the same arc.
+              tone: FAILING_GRADES.includes(point.grade.trim().toUpperCase()) ? 'danger' : undefined,
             }))}
           />
         </Card>

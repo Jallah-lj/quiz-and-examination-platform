@@ -99,7 +99,11 @@ function adminPayload(): AdminDashboard {
     passRate: { graded: 10, passed: 9, average_percentage: 53.25, passRate: 90 },
     recentActivity: [],
     performanceBySubject: [{ subject: 'Probability & Statistics', results: 10, average_percentage: 53.25, passed: 9 }],
-    gradeDistribution: [{ grade: 'B', count: 4 }],
+    gradeDistribution: [
+      { grade: 'C', count: 2 },
+      { grade: 'D', count: 6 },
+      { grade: 'F', count: 2 },
+    ],
     submissionsByDay: [
       { day: '2026-09-15', submissions: 0 },
       { day: '2026-09-16', submissions: 6 },
@@ -386,6 +390,28 @@ describe('institution administrator dashboard', () => {
     const outcomes = screen.getByRole('row', { name: /Continuous Assessment — Probability/ });
     expect(within(outcomes).getByText('90%')).toBeInTheDocument();
     expect(within(outcomes).getByRole('link', { name: 'Results' })).toHaveAttribute('href', '/results?examId=3');
+
+    // Grade distribution: every band gets its own colour, and the figures sit with their labels.
+    const gradeCard = screen.getByText('Grade distribution').closest('.card') as HTMLElement;
+    const arcs = Array.from(gradeCard.querySelectorAll('circle')).map((node) => node.getAttribute('class'));
+    expect(arcs).toHaveLength(3);
+    expect(new Set(arcs).size).toBe(3);
+    const legend = Array.from(gradeCard.querySelectorAll('.chart__legend li')).map((row) => ({
+      label: row.querySelector('.chart__legend-label')?.textContent,
+      value: row.querySelector('.chart__legend-value')?.textContent,
+    }));
+    expect(legend).toEqual([
+      { label: 'C', value: '2 (20%)' },
+      { label: 'D', value: '6 (60%)' },
+      { label: 'F', value: '2 (20%)' },
+    ]);
+    // The ring states the total it is drawn from.
+    expect(within(gradeCard).getByText('10')).toBeInTheDocument();
+
+    // The two chart panels share one proportional band, not two squeezed halves.
+    const band = gradeCard.parentElement as HTMLElement;
+    expect(band.className).toContain('dashboard-charts');
+    expect(within(band).getByText('Submissions over time')).toBeInTheDocument();
 
     // A panel with no qualifying records explains why instead of showing an empty chart.
     expect(screen.getByText('No candidate is below the pass mark')).toBeInTheDocument();

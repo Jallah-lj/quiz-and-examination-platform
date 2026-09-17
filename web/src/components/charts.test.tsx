@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import { BarChart, DonutChart, LineChart, axisTickIndexes } from './charts';
+import { BarChart, DonutChart, LineChart, axisTickIndexes, distinctTones } from './charts';
 
 /** Pretend the panel is a given number of CSS pixels wide, as a real layout would. */
 function withPanelWidth(width: number) {
@@ -208,7 +208,7 @@ describe('chart panels fit the space they are given', () => {
     expect(narrowSize).toBeLessThan(wideSize);
     expect(narrowSize).toBeGreaterThanOrEqual(132);
     // Never larger than the default, however wide the card gets.
-    expect(wideSize).toBe(168);
+    expect(wideSize).toBe(184);
     // The viewBox follows the diameter, so the ring keeps its proportions.
     expect(wide.container.querySelector('svg')?.getAttribute('viewBox')).toBe(`0 0 ${wideSize} ${wideSize}`);
   });
@@ -236,5 +236,81 @@ describe('chart panels fit the space they are given', () => {
     expect(labels.length).toBeGreaterThanOrEqual(3);
     expect(labels.length).toBeLessThanOrEqual(7);
     expect(labels[labels.length - 1].textContent).toBe('08-30');
+  });
+});
+
+describe('distribution rings', () => {
+  const grades = [
+    { label: 'C', value: 2 },
+    { label: 'D', value: 6 },
+    { label: 'F', value: 2, tone: 'danger' },
+  ];
+
+  it('never draws two slices in the same colour when a tone is left open', () => {
+    const tones = distinctTones(grades);
+    expect(tones[2].tone).toBe('danger');
+    const used = tones.map((point) => point.tone);
+    expect(new Set(used).size).toBe(used.length);
+    // The failing band keeps the colour the caller pinned.
+    expect(used).not.toEqual(['danger', 'danger', 'danger']);
+  });
+
+  it('keeps the assigned colours on the arcs and the legend swatches', () => {
+    render(<DonutChart ariaLabel="Grade distribution" data={grades} />);
+    const figure = screen.getByRole('img', { name: 'Grade distribution' }).closest('figure')!;
+    const arcs = Array.from(figure.querySelectorAll('circle')).map((node) => node.getAttribute('class'));
+    const swatches = Array.from(figure.querySelectorAll('.chart__swatch')).map((node) => node.getAttribute('class'));
+
+    expect(arcs).toHaveLength(3);
+    expect(new Set(arcs).size).toBe(3);
+    // Each legend swatch matches its arc, so the key and the ring agree.
+    const toneOf = (name: string | null, prefix: string) => name?.match(new RegExp(`${prefix}--(\\w+)`))?.[1];
+    expect(swatches.map((name) => toneOf(name, 'chart__swatch'))).toEqual(
+      arcs.map((name) => toneOf(name, 'chart__segment')),
+    );
+  });
+
+  it('draws a solid ring that stays inside its viewBox', () => {
+    render(<DonutChart ariaLabel="Grade distribution" data={grades} />);
+    const svg = screen.getByRole('img', { name: 'Grade distribution' });
+    const diameter = Number(svg.getAttribute('width'));
+    const arcs = Array.from(svg.querySelectorAll('circle'));
+    const stroke = Number(arcs[0].getAttribute('stroke-width'));
+    const radius = Number(arcs[0].getAttribute('r'));
+
+    // Thick enough to read as a band rather than a hairline outline.
+    expect(stroke).toBeGreaterThanOrEqual(Math.round(diameter * 0.14));
+    expect(radius + stroke / 2).toBeLessThanOrEqual(diameter / 2);
+    // The three bands add up to a full circle.
+    const circumference = 2 * Math.PI * radius;
+    const drawn = arcs.reduce(
+      (sum, arc) => sum + Number(String(arc.getAttribute('stroke-dasharray')).split(' ')[0]),
+      0,
+    );
+    expect(drawn).toBeCloseTo(circumference, 4);
+  });
+});
+
+describe('daily bars', () => {
+  it('leaves a zero day empty instead of stubbing the baseline', () => {
+    // A run of zero days used to paint a minimum-height bar each, which read as a dashed line.
+    render(
+      <BarChart
+        ariaLabel="Submissions per day"
+        data={[
+          { label: '09-14', value: 0 },
+          { label: '09-15', value: 0 },
+          { label: '09-16', value: 19 },
+          { label: '09-17', value: 1 },
+        ]}
+      />,
+    );
+    const bars = Array.from(screen.getByRole('img', { name: 'Submissions per day' }).querySelectorAll('.chart__bar'));
+    const heights = bars.map((bar) => Number.parseFloat((bar as HTMLElement).style.height));
+    expect(heights.slice(0, 2)).toEqual([0, 0]);
+    // The peak day fills the plot; a day with a single submission stays visible.
+    expect(heights[2]).toBeGreaterThan(140);
+    expect(heights[3]).toBeGreaterThanOrEqual(3);
+    expect(heights[3]).toBeLessThan(20);
   });
 });

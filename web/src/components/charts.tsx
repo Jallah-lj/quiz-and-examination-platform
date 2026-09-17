@@ -63,6 +63,24 @@ function useMeasuredWidth<T extends HTMLElement>(fallback: number) {
   return [ref, width] as const;
 }
 
+/**
+ * Colours for a categorical series, such as a grade distribution. A caller may pin a tone
+ * (a failing band stays red); whatever is left open is handed the next unused colour, so
+ * two slices can never be drawn in exactly the same colour — which is what makes an
+ * otherwise correct distribution impossible to read.
+ */
+export function distinctTones(data: SeriesPoint[]): SeriesPoint[] {
+  const taken = new Set<Tone>(
+    data.map((point) => toneName(point.tone)).filter((tone) => tone !== 'default'),
+  );
+  return data.map((point) => {
+    if (point.tone) return point;
+    const next = TONES.find((tone) => !taken.has(tone)) ?? 'default';
+    taken.add(next);
+    return { ...point, tone: next };
+  });
+}
+
 function summarise(data: SeriesPoint[], unit?: string): string {
   const total = data.reduce((sum, point) => sum + point.value, 0);
   const peak = data.reduce((best, point) => (point.value > best.value ? point : best), data[0]);
@@ -129,7 +147,11 @@ export function BarChart({
             </span>
             <span
               className={`chart__bar chart__bar--${toneName(point.tone)}`}
-              style={{ height: `${Math.max(2, (point.value / max) * plotHeight)}px` }}
+              style={{
+                // A day with no submissions draws nothing: a visible minimum height would
+                // turn a run of zero days into a dashed line along the baseline.
+                height: point.value === 0 ? 0 : `${Math.max(3, (point.value / max) * plotHeight)}px`,
+              }}
             />
             <span className={`chart__label ${ticks.has(index) ? '' : 'chart__label--hidden'}`} aria-hidden={!ticks.has(index)}>
               {ticks.has(index) ? point.label : data[0].label}
@@ -247,7 +269,7 @@ export function LineChart({
 export function DonutChart({
   data,
   ariaLabel,
-  size = 168,
+  size = 184,
 }: {
   data: SeriesPoint[];
   ariaLabel: string;
@@ -262,8 +284,11 @@ export function DonutChart({
    * The ring keeps its proportions but follows the column it sits in: it shrinks on a
    * narrow card and is capped on a wide one, so the legend always has room beside it.
    */
-  const diameter = Math.max(132, Math.min(size, Math.round(width * 0.46)));
-  const radius = diameter / 2 - 14;
+  const segments = distinctTones(data);
+  const diameter = Math.max(140, Math.min(size, Math.round(width * 0.46)));
+  // A ring thick enough to read as a solid band, inset so it never touches the viewBox.
+  const thickness = Math.max(16, Math.round(diameter * 0.15));
+  const radius = diameter / 2 - thickness / 2 - 1;
   const circumference = 2 * Math.PI * radius;
   let offset = 0;
 
@@ -278,7 +303,7 @@ export function DonutChart({
         aria-label={ariaLabel}
       >
         <g transform={`rotate(-90 ${diameter / 2} ${diameter / 2})`}>
-          {data.map((point) => {
+          {segments.map((point) => {
             const fraction = point.value / total;
             const dash = fraction * circumference;
             const circle = (
@@ -289,7 +314,7 @@ export function DonutChart({
                 cy={diameter / 2}
                 r={radius}
                 fill="none"
-                strokeWidth={16}
+                strokeWidth={thickness}
                 strokeDasharray={`${dash} ${circumference - dash}`}
                 strokeDashoffset={-offset}
               />
@@ -298,15 +323,15 @@ export function DonutChart({
             return circle;
           })}
         </g>
-        <text x="50%" y="48%" textAnchor="middle" className="chart__donut-value">
+        <text x="50%" y="47%" textAnchor="middle" className="chart__donut-value">
           {total}
         </text>
-        <text x="50%" y="60%" textAnchor="middle" className="chart__axis">
-          total
+        <text x="50%" y="59%" textAnchor="middle" className="chart__axis">
+          {total === 1 ? 'result' : 'results'}
         </text>
       </svg>
       <ul className="chart__legend">
-        {data.map((point) => (
+        {segments.map((point) => (
           <li key={point.label}>
             <span className={`chart__swatch chart__swatch--${toneName(point.tone)}`} aria-hidden="true" />
             <span className="chart__legend-label">{point.label}</span>
