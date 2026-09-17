@@ -4,6 +4,7 @@
  */
 import { Router } from 'express';
 import { getDb } from '../db';
+import { resolveScheme } from '../lib/grading';
 import { asyncHandler, ok } from '../lib/http';
 import { forbidden, notFound, unprocessable, validationError } from '../lib/errors';
 import type { AuthedRequest } from '../types';
@@ -192,6 +193,22 @@ router.get(
         .get(req.user!.id) as { c: number }
     ).c;
 
+    // Written answers of this candidate that an examiner still has to mark. Without this
+    // the "not yet released" notice claimed an examiner was marking papers that hold no
+    // written questions at all.
+    const awaitingMarking = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS c
+             FROM attempts a
+             JOIN attempt_questions aq ON aq.attempt_id = a.id AND aq.is_objective = 0
+             LEFT JOIN answers an ON an.attempt_id = a.id AND an.question_id = aq.question_id
+            WHERE a.student_id = ? AND a.status IN ('SUBMITTED','UNDER_REVIEW')
+              AND (an.id IS NULL OR an.awarded_marks IS NULL)`,
+        )
+        .get(studentId) as { c: number }
+    ).c;
+
     // Where the candidate stands per subject, from released results only — the same
     // figures their institution publishes, never an internal estimate.
     const subjectPerformance = db
@@ -283,7 +300,10 @@ router.get(
             key: 'awaiting',
             severity: 'info' as const,
             title: `${stats.awaiting_release} submitted attempt(s) not yet released`,
-            detail: 'Written answers are marked by your examiners; results appear once the institution publishes them.',
+            detail:
+              awaitingMarking > 0
+                ? `${awaitingMarking} written answer${awaitingMarking === 1 ? '' : 's'} still to be marked; results appear once the institution publishes them.`
+                : 'Nothing needs marking by hand — results appear once the institution publishes them.',
             link: '/my-attempts',
           }
         : null,
@@ -642,6 +662,7 @@ router.get(
       .prepare(
         `SELECT COUNT(*) AS graded,
                 SUM(CASE WHEN outcome = 'PASSED' THEN 1 ELSE 0 END) AS passed,
+                SUM(CASE WHEN outcome = 'FAILED' THEN 1 ELSE 0 END) AS failed,
                 COALESCE(ROUND(AVG(percentage), 2), 0) AS average_percentage
            FROM results WHERE institution_id = ? AND outcome != 'PENDING'`,
       )
@@ -757,18 +778,26 @@ router.get(
       .all(scope);
 
     // Subjective answers still waiting for an examiner, and how long the oldest has waited.
+    // Submissions that have no result row at all are counted separately: they are what the
+    // institution actually has to act on, whether or not they contain written answers.
     const gradingBacklog = db
       .prepare(
         `SELECT COUNT(*) AS ungraded_answers,
                 COUNT(DISTINCT a.id) AS attempts,
-                MIN(a.submitted_at) AS oldest_waiting
+                MIN(a.submitted_at) AS oldest_waiting,
+                (SELECT COUNT(*) FROM attempts q
+                   WHERE q.institution_id = ? AND q.status IN ('SUBMITTED','UNDER_REVIEW')) AS queue,
+                (SELECT COUNT(*) FROM attempts q
+                   LEFT JOIN results qr ON qr.attempt_id = q.id
+                  WHERE q.institution_id = ? AND q.status IN ('SUBMITTED','UNDER_REVIEW')
+                    AND qr.id IS NULL) AS awaiting_results
            FROM attempts a
            JOIN attempt_questions aq ON aq.attempt_id = a.id AND aq.is_objective = 0
            LEFT JOIN answers an ON an.attempt_id = a.id AND an.question_id = aq.question_id
           WHERE a.institution_id = ? AND a.status IN ('SUBMITTED','UNDER_REVIEW')
             AND (an.id IS NULL OR an.awarded_marks IS NULL)`,
       )
-      .get(scope) as any;
+      .get(scope, scope, scope) as any;
 
     const paperIntegrity = db
       .prepare(
@@ -783,6 +812,45 @@ router.get(
               AND e.end_at BETWEEN ? AND ?) AS exams_ending_soon`,
       )
       .get(scope, scope, scope, scope, now, addDays(now, 1)) as any;
+
+    /*
+     * A paper's pass mark is set in marks, while the grade comes from the institution
+     * grading scale. When the pass mark sits inside a failing band a candidate can pass
+     * the paper and still be awarded an F, so the pass rate and the grade distribution
+     * describe the same results differently. This is a real configuration conflict, and
+     * it is reported rather than hidden.
+     */
+    const passMarkConflicts = (
+      db
+        .prepare(
+          `SELECT e.id, e.name, e.code, e.total_marks, e.pass_marks, e.grading_scheme_id,
+                  ROUND(e.pass_marks * 100.0 / e.total_marks, 2) AS pass_percentage
+             FROM exams e
+            WHERE e.institution_id = ? AND e.total_marks > 0
+              AND e.status IN ('DRAFT','SCHEDULED','ACTIVE','UNDER_REVIEW','PUBLISHED')
+            ORDER BY e.id`,
+        )
+        .all(scope) as any[]
+    )
+      .map((exam) => {
+        // Mirrors the resolver the grading service uses: the paper's own scheme, else the
+        // institution default.
+        const scheme = resolveScheme(db, scope, exam.grading_scheme_id);
+        const lowestPassingBand = scheme.bands.reduce<number | null>(
+          (lowest, band) =>
+            band.min_percentage > 0 && (lowest === null || band.min_percentage < lowest)
+              ? band.min_percentage
+              : lowest,
+          null,
+        );
+        return { ...exam, lowest_passing_band: lowestPassingBand };
+      })
+      .filter(
+        (exam) =>
+          exam.lowest_passing_band !== null &&
+          Number(exam.pass_percentage) < Number(exam.lowest_passing_band),
+      );
+    paperIntegrity.pass_mark_in_failing_band = passMarkConflicts.length;
 
     // Period-over-period movement, so the headline numbers can show direction.
     const submissionsRecent = (
@@ -832,6 +900,28 @@ router.get(
                 ? `${gradingBacklog.attempts} submission(s) in review. Results stay withheld until every written answer is marked.`
                 : 'Results stay withheld until every written answer is marked.',
             link: '/grading',
+          }
+        : null,
+      gradingBacklog.awaiting_results > 0
+        ? {
+            key: 'missing-results',
+            severity: 'warning' as const,
+            title: `${gradingBacklog.awaiting_results} submission(s) have no result recorded`,
+            detail:
+              'These submissions are in the queue but grading never produced a result row, so they are missing from every published figure. Finalise them in the grading queue.',
+            link: '/grading/queue',
+          }
+        : null,
+      passMarkConflicts.length > 0
+        ? {
+            key: 'pass-mark-conflict',
+            severity: 'warning' as const,
+            title: `${passMarkConflicts.length} paper(s) can be passed with a failing grade`,
+            detail: `${passMarkConflicts
+              .slice(0, 3)
+              .map((exam) => `${exam.name} (${exam.pass_percentage}% pass mark, grades fail below ${exam.lowest_passing_band}%)`)
+              .join('; ')}${passMarkConflicts.length > 3 ? ` and ${passMarkConflicts.length - 3} more` : ''}.`,
+            link: `/examinations/${passMarkConflicts[0].id}`,
           }
         : null,
       counts.withheld_results > 0
@@ -903,6 +993,7 @@ router.get(
       attention,
       gradingBacklog,
       paperIntegrity,
+      passMarkConflicts,
       examPipeline,
       upcomingExams,
       examPerformance,

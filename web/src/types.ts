@@ -894,20 +894,40 @@ export interface StudentDashboard {
 export interface AdminDashboard {
   serverTime: string;
   counts: Record<string, number>;
-  passRate: { graded: number; passed: number; average_percentage: number; passRate: number };
+  passRate: { graded: number; passed: number; failed: number; average_percentage: number; passRate: number };
   recentActivity: AuditLogRow[];
   performanceBySubject: { subject: string; results: number; average_percentage: number; passed: number }[];
   gradeDistribution: { grade: string; count: number }[];
   submissionsByDay: { day: string; submissions: number }[];
   classPerformance: { id: number; class_name: string; students: number; average_percentage: number }[];
   attention: DashboardAttention[];
-  gradingBacklog: { ungraded_answers: number; attempts: number; oldest_waiting: string | null };
+  gradingBacklog: {
+    ungraded_answers: number;
+    attempts: number;
+    oldest_waiting: string | null;
+    /** Submissions in the grading queue (submitted or under review). */
+    queue: number;
+    /** Of those, the ones grading never produced a result row for. */
+    awaiting_results: number;
+  };
   paperIntegrity: {
     exams_without_questions: number;
     scheduled_without_candidates: number;
     pending_accounts: number;
     exams_ending_soon: number;
+    /** Papers whose pass mark falls inside a failing band of their grading scale. */
+    pass_mark_in_failing_band: number;
   };
+  /** Named papers behind `paperIntegrity.pass_mark_in_failing_band`. */
+  passMarkConflicts: {
+    id: number;
+    name: string;
+    code: string;
+    total_marks: number;
+    pass_marks: number;
+    pass_percentage: number;
+    lowest_passing_band: number;
+  }[];
   examPipeline: { status: ExamStatus; count: number; window_open: number }[];
   upcomingExams: {
     id: number;

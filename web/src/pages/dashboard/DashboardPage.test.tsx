@@ -96,7 +96,10 @@ function adminPayload(): AdminDashboard {
       awaiting_grading: 0,
       published_results: 10,
     },
-    passRate: { graded: 10, passed: 9, average_percentage: 53.25, passRate: 90 },
+    // Nine passes and one failure is what the stored results actually say; the grade
+    // scale separately awards an F to anything under 50%, which is why one paper that
+    // passed its 45% pass mark is still graded F (see passMarkConflicts below).
+    passRate: { graded: 10, passed: 9, failed: 1, average_percentage: 53.25, passRate: 90 },
     recentActivity: [],
     performanceBySubject: [{ subject: 'Probability & Statistics', results: 10, average_percentage: 53.25, passed: 9 }],
     gradeDistribution: [
@@ -125,13 +128,25 @@ function adminPayload(): AdminDashboard {
         link: '/examinations?status=DRAFT',
       },
     ],
-    gradingBacklog: { ungraded_answers: 0, attempts: 0, oldest_waiting: null },
+    gradingBacklog: { ungraded_answers: 0, attempts: 0, oldest_waiting: null, queue: 3, awaiting_results: 0 },
     paperIntegrity: {
       exams_without_questions: 1,
       scheduled_without_candidates: 0,
       pending_accounts: 1,
       exams_ending_soon: 0,
+      pass_mark_in_failing_band: 1,
     },
+    passMarkConflicts: [
+      {
+        id: 3,
+        name: 'Statistics Continuous Assessment',
+        code: 'STA-CA1',
+        total_marks: 20,
+        pass_marks: 9,
+        pass_percentage: 45,
+        lowest_passing_band: 50,
+      },
+    ],
     examPipeline: [
       { status: 'DRAFT', count: 1, window_open: 0 },
       { status: 'ACTIVE', count: 1, window_open: 1 },
@@ -382,7 +397,18 @@ describe('institution administrator dashboard', () => {
 
     // Structural checks and the exception queue carry the numbers from the API.
     expect(screen.getByText('Papers without questions')).toBeInTheDocument();
-    expect(screen.getByText('Nothing is waiting to be marked')).toBeInTheDocument();
+    // The card reports the whole queue, not just submissions with unmarked written answers.
+    expect(screen.getByText('Awaiting results')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('Nothing needs marking by hand')).toBeInTheDocument();
+    // The pass rate names its failures, and the grade scale explains the F bands.
+    expect(screen.getByText('9 passed · 1 failed of 10 graded results')).toBeInTheDocument();
+    expect(screen.getByText('Every graded result, awarded on the institution grading scale.')).toBeInTheDocument();
+    // A paper that can be passed with a failing grade is reported with its numbers.
+    expect(screen.getByText('Pass mark inside a failing grade band')).toBeInTheDocument();
+    expect(
+      screen.getByText('Statistics Continuous Assessment (passes at 45%, graded F below 50%)'),
+    ).toBeInTheDocument();
     expect(screen.getByText('1 paper(s) without questions')).toBeInTheDocument();
     expect(screen.getByText('Action required')).toBeInTheDocument();
 

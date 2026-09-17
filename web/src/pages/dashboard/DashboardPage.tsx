@@ -129,7 +129,7 @@ function StudentDashboard() {
           label="Pass rate"
           value={rate === null ? '—' : formatPercentage(rate)}
           tone={rate === null ? 'neutral' : rate >= 50 ? 'success' : 'warning'}
-          meta={`${stats.passed} passed · ${stats.failed} failed`}
+          meta={stats.graded > 0 ? `${stats.passed} passed · ${stats.failed} failed` : 'No released results yet'}
         />
       </div>
 

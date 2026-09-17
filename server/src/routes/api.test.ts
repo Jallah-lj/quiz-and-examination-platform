@@ -629,6 +629,93 @@ describe('role dashboards', () => {
     expect(after.body.data.attention.every((item: { link: string }) => item.link.startsWith('/'))).toBe(true);
   });
 
+  it('reports the failures the pass rate is measured against', async () => {
+    const student = await harness.login('student@alpha.test');
+    const start = await student.post('/api/attempts').send({ examId: fixture.examId });
+    const attemptId = start.body.data.attemptId as number;
+    for (const questionId of fixture.objectiveQuestions) {
+      // 'A' is not the key the fixture marks correct, so the attempt fails once marked.
+      await student.patch(`/api/attempts/${attemptId}/answers/${questionId}`).send({ selectedOptions: ['A'] });
+    }
+    await student
+      .patch(`/api/attempts/${attemptId}/answers/${fixture.essayQuestionId}`)
+      .send({ answerText: 'Covering indexes avoid the table lookup.' });
+    await student.post(`/api/attempts/${attemptId}/submit`).send({});
+
+    const teacher = await harness.login('teacher@alpha.test');
+    const attempt = await teacher.get(`/api/grading/attempts/${attemptId}`);
+    const essay = attempt.body.data.questions.find(
+      (question: { type: string }) => question.type === 'ESSAY',
+    );
+    await teacher
+      .post(`/api/grading/attempts/${attemptId}/answers/${essay.answer.id}`)
+      .send({ awardedMarks: 0, comment: 'Not attempted.' });
+    await teacher.post(`/api/grading/attempts/${attemptId}/finalize`).send({});
+
+    const admin = await harness.login('admin@alpha.test');
+    const dashboard = await admin.get('/api/dashboard/admin');
+    expect(dashboard.status).toBe(200);
+    const { graded, passed, failed } = dashboard.body.data.passRate;
+    // The three figures must account for every graded result.
+    expect(graded).toBe(passed + failed);
+    expect(failed).toBe(1);
+    expect(dashboard.body.data.passRate.passRate).toBe(0);
+  });
+
+  it('separates submissions awaiting a result from submissions grading never recorded', async () => {
+    const student = await harness.login('student@alpha.test');
+    const start = await student.post('/api/attempts').send({ examId: fixture.examId });
+    const attemptId = start.body.data.attemptId as number;
+    await student
+      .patch(`/api/attempts/${attemptId}/answers/${fixture.essayQuestionId}`)
+      .send({ answerText: 'Partial answer.' });
+    await student.post(`/api/attempts/${attemptId}/submit`).send({});
+
+    const admin = await harness.login('admin@alpha.test');
+    const dashboard = await admin.get('/api/dashboard/admin');
+    // The submission is queued with a pending result and one written answer to mark.
+    expect(dashboard.body.data.gradingBacklog).toMatchObject({
+      queue: 1,
+      ungraded_answers: 1,
+      awaiting_results: 0,
+    });
+    const marking = dashboard.body.data.attention.find((item: { key: string }) => item.key === 'grading');
+    expect(marking).toBeTruthy();
+    expect(marking.link).toBe('/grading');
+    // Submitting records a result row, so no integrity warning is raised.
+    expect(
+      dashboard.body.data.attention.find((item: { key: string }) => item.key === 'missing-results'),
+    ).toBeUndefined();
+  });
+
+  it('flags a paper whose pass mark falls inside a failing grade band', async () => {
+    const admin = await harness.login('admin@alpha.test');
+    // The fixture paper passes at 20 of 45 marks (44.44%), inside the default scale's
+    // failing band, so it is reported along with the numbers behind the conflict.
+    const before = await admin.get('/api/dashboard/admin');
+    expect(before.body.data.paperIntegrity.pass_mark_in_failing_band).toBe(1);
+    const [conflict] = before.body.data.passMarkConflicts;
+    expect(conflict.id).toBe(fixture.examId);
+    expect(conflict.pass_percentage).toBeCloseTo(44.44, 2);
+    expect(conflict.lowest_passing_band).toBe(50);
+    const item = before.body.data.attention.find(
+      (entry: { key: string }) => entry.key === 'pass-mark-conflict',
+    );
+    expect(item.severity).toBe('warning');
+    expect(item.link).toBe(`/examinations/${fixture.examId}`);
+
+    // Raising the pass mark past the failing band clears the conflict.
+    const update = await admin.patch(`/api/examinations/${fixture.examId}`).send({ passMarks: 25 });
+    expect(update.status).toBe(200);
+
+    const after = await admin.get('/api/dashboard/admin');
+    expect(after.body.data.paperIntegrity.pass_mark_in_failing_band).toBe(0);
+    expect(after.body.data.passMarkConflicts).toEqual([]);
+    expect(
+      after.body.data.attention.find((entry: { key: string }) => entry.key === 'pass-mark-conflict'),
+    ).toBeUndefined();
+  });
+
   it('reports the written answers still blocking publication, including blank ones', async () => {
     const student = await harness.login('student@alpha.test');
     const start = await student.post('/api/attempts').send({ examId: fixture.examId });
@@ -747,6 +834,35 @@ describe('role dashboards', () => {
     const admin = await harness.login('admin@alpha.test');
     const forbidden = await admin.get('/api/dashboard/platform');
     expect(forbidden.status).toBe(403);
+  });
+
+  it('tells a candidate why their result has not been released, truthfully', async () => {
+    const student = await harness.login('student@alpha.test');
+    const started = await student.post('/api/attempts').send({ examId: fixture.examId });
+    const attemptId = started.body.data.attemptId as number;
+    await student
+      .patch(`/api/attempts/${attemptId}/answers/${fixture.essayQuestionId}`)
+      .send({ answerText: 'Partial.' });
+    await student.post(`/api/attempts/${attemptId}/submit`).send({});
+
+    // The paper holds a written question, so an examiner really is the reason it waits.
+    const before = await student.get('/api/dashboard/student');
+    const awaiting = before.body.data.attention.find((item: { key: string }) => item.key === 'awaiting');
+    expect(awaiting.detail).toMatch(/1 written answer still to be marked/i);
+
+    // Once that answer is marked the only thing left is publication, and the notice says so
+    // instead of claiming someone is still marking.
+    const teacher = await harness.login('teacher@alpha.test');
+    const attempt = await teacher.get(`/api/grading/attempts/${attemptId}`);
+    const essay = attempt.body.data.questions.find((question: { type: string }) => question.type === 'ESSAY');
+    await teacher
+      .post(`/api/grading/attempts/${attemptId}/answers/${essay.answer.id}`)
+      .send({ awardedMarks: 5, comment: 'Marked.' });
+
+    const after = await student.get('/api/dashboard/student');
+    const notice = after.body.data.attention.find((item: { key: string }) => item.key === 'awaiting');
+    expect(notice.detail).toMatch(/nothing needs marking by hand/i);
+    expect(notice.detail).not.toMatch(/written answer/i);
   });
 
   it('makes an institution explicit for platform staff instead of reporting zeros', async () => {

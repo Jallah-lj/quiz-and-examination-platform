@@ -46,6 +46,25 @@ export function InstitutionDashboardView({
   const { counts } = data;
   const rate = data.passRate.passRate ?? passRate(data.passRate.passed, data.passRate.graded);
   const oldest = data.gradingBacklog.oldest_waiting;
+  const { graded, passed, failed } = data.passRate;
+  const { queue, ungraded_answers: ungradedAnswers } = data.gradingBacklog;
+
+  /*
+   * The pass rate follows each paper's own pass mark, while grades follow the institution
+   * grading scale. When a paper's pass mark sits inside a failing band the two disagree,
+   * so each figure states which rule produced it instead of looking contradictory.
+   */
+  const passRateDetail =
+    graded > 0
+      ? `${passed} passed${failed > 0 ? ` · ${failed} failed` : ''} of ${graded} graded result${graded === 1 ? '' : 's'}`
+      : 'No graded results yet';
+
+  const awaitingDetail =
+    ungradedAnswers > 0
+      ? `${ungradedAnswers} written answer${ungradedAnswers === 1 ? '' : 's'} to mark${oldest ? ` · oldest waiting since ${formatDateTime(oldest)}` : ''}`
+      : queue > 0
+        ? 'Nothing needs marking by hand'
+        : 'Nothing is waiting to be marked';
 
   return (
     <div className="page">
@@ -90,20 +109,16 @@ export function InstitutionDashboardView({
           meta={<StatDelta delta={data.deltas.publishedResults} />}
         />
         <StatCard
-          label="Awaiting grading"
-          value={data.gradingBacklog.ungraded_answers}
-          tone={data.gradingBacklog.ungraded_answers > 0 ? 'warning' : 'neutral'}
-          meta={
-            oldest
-              ? `${data.gradingBacklog.attempts} submission(s) · oldest waiting since ${formatDateTime(oldest)}`
-              : 'Nothing is waiting to be marked'
-          }
+          label="Awaiting results"
+          value={queue}
+          tone={ungradedAnswers > 0 ? 'warning' : queue > 0 ? 'accent' : 'neutral'}
+          meta={awaitingDetail}
         />
         <StatCard
           label="Pass rate"
           value={rate === null ? '—' : formatPercentage(rate)}
           tone={rate === null ? 'neutral' : rate >= 50 ? 'success' : 'danger'}
-          meta={data.passRate.graded > 0 ? `${data.passRate.passed} of ${data.passRate.graded} graded results` : 'No graded results yet'}
+          meta={passRateDetail}
         />
         <StatCard
           label="Average score"
@@ -138,7 +153,7 @@ export function InstitutionDashboardView({
         <Card
           className="card--chart"
           title="Grade distribution"
-          description="Released results grouped by awarded grade."
+          description="Every graded result, awarded on the institution grading scale."
         >
           <DonutChart
             ariaLabel="Grade distribution across released results"
@@ -181,6 +196,23 @@ export function InstitutionDashboardView({
               <span>Accounts awaiting approval</span>
               <Badge tone={data.paperIntegrity.pending_accounts > 0 ? 'warning' : 'success'}>
                 {data.paperIntegrity.pending_accounts}
+              </Badge>
+            </li>
+            <li className="check-list__item">
+              <span>
+                Pass mark inside a failing grade band
+                {data.passMarkConflicts.length > 0 ? (
+                  <span className="check-list__note">
+                    {data.passMarkConflicts
+                      .slice(0, 2)
+                      .map((exam) => `${exam.name} (passes at ${exam.pass_percentage}%, graded F below ${exam.lowest_passing_band}%)`)
+                      .join(' · ')}
+                    {data.passMarkConflicts.length > 2 ? ` · +${data.passMarkConflicts.length - 2} more` : ''}
+                  </span>
+                ) : null}
+              </span>
+              <Badge tone={data.paperIntegrity.pass_mark_in_failing_band > 0 ? 'warning' : 'success'}>
+                {data.paperIntegrity.pass_mark_in_failing_band}
               </Badge>
             </li>
           </ul>
