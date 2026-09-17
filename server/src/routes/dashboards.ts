@@ -688,10 +688,14 @@ router.get(
       )
       .all(scope);
 
+    // "Every graded result": a submission still in review has a provisional grade computed
+    // from its objective answers alone, so it is excluded here and joins the distribution
+    // only once marking is finalised — keeping this panel consistent with `passRate.graded`.
     const gradeDistribution = db
       .prepare(
         `SELECT grade, COUNT(*) AS count FROM results
-          WHERE institution_id = ? AND grade IS NOT NULL GROUP BY grade ORDER BY grade ASC`,
+          WHERE institution_id = ? AND grade IS NOT NULL AND outcome != 'PENDING'
+          GROUP BY grade ORDER BY grade ASC`,
       )
       .all(scope);
 

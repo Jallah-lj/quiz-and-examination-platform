@@ -868,6 +868,38 @@ describe('role dashboards', () => {
     ).toBeUndefined();
   });
 
+  it('counts only finalised results in the grade distribution', async () => {
+    const student = await harness.login('student@alpha.test');
+    const start = await student.post('/api/attempts').send({ examId: fixture.examId });
+    const attemptId = start.body.data.attemptId as number;
+    await student
+      .patch(`/api/attempts/${attemptId}/answers/${fixture.essayQuestionId}`)
+      .send({ answerText: 'Draft answer awaiting a marker.' });
+    await student.post(`/api/attempts/${attemptId}/submit`).send({});
+
+    const total = (rows: { count: number }[]) => rows.reduce((sum, row) => sum + row.count, 0);
+    const admin = await harness.login('admin@alpha.test');
+    const inReview = await admin.get('/api/dashboard/admin');
+    // The submission carries a provisional grade while it waits for marking; the panel
+    // describes graded results, so it must match the graded population exactly.
+    expect(inReview.body.data.gradingBacklog.queue).toBe(1);
+    expect(total(inReview.body.data.gradeDistribution)).toBe(inReview.body.data.passRate.graded);
+
+    const attempt = await admin.get(`/api/grading/attempts/${attemptId}`);
+    const essay = attempt.body.data.questions.find(
+      (question: { type: string }) => question.type === 'ESSAY',
+    );
+    const teacher = await harness.login('teacher@alpha.test');
+    await teacher
+      .post(`/api/grading/attempts/${attemptId}/answers/${essay.answer.id}`)
+      .send({ awardedMarks: 10, comment: 'Solid answer.' });
+    await teacher.post(`/api/grading/attempts/${attemptId}/finalize`).send({});
+
+    const finalised = await admin.get('/api/dashboard/admin');
+    expect(finalised.body.data.passRate.graded).toBe(inReview.body.data.passRate.graded + 1);
+    expect(total(finalised.body.data.gradeDistribution)).toBe(finalised.body.data.passRate.graded);
+  });
+
   it('flags a paper whose pass mark falls inside a failing grade band', async () => {
     const admin = await harness.login('admin@alpha.test');
     // The fixture paper passes at 20 of 45 marks (44.44%), inside the default scale's

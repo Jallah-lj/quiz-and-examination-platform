@@ -132,7 +132,12 @@ export default function QuestionBanksPage() {
                 },
                 { key: 'questions', header: 'Questions', align: 'right', render: (row) => `${row.active_questions ?? 0} active / ${row.total_questions ?? 0}` },
                 { key: 'owner', header: 'Created by', render: (row) => row.created_by_name ?? '—' },
-                { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status === 'active' ? 'ACTIVE_STATUS' : 'ARCHIVED'} /> },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  // Bank status is stored in lower case; the badge maps the documented states.
+                  render: (row) => <StatusBadge status={row.status?.toUpperCase() ?? null} />,
+                },
                 { key: 'updated', header: 'Updated', render: (row) => formatDate(row.updated_at) },
                 {
                   key: 'actions',

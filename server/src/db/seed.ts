@@ -15,8 +15,9 @@ import { closeDb, getDb } from './index';
 import { hashPassword } from '../lib/crypto';
 import { bootstrapPlatform, syncRolesAndPermissions } from './bootstrap';
 import { nowIso, addDays, addHours } from '../lib/time';
-import { gradeObjective, round2, type AnswerKey } from '../lib/answer-key';
-import { computeFinalScore, resolveScheme } from '../lib/grading';
+import { isObjectiveType, parseAnswerConfig, round2, type AnswerKey } from '../lib/answer-key';
+import { finaliseAttempt } from '../services/attempts';
+import { finalizeGrading, saveGrade, type GradingActor } from '../services/grading';
 
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'Demo-Password1';
 const RESET = process.argv.includes('--reset');
@@ -434,20 +435,88 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
     }
     createdQuestions.push({ id: questionId, subjectIndex, type: blueprint.type });
   }
-  counts.questions = createdQuestions.length;
+  /*
+   * Written questions are created outside the objective cycle above, because a paper either
+   * carries written work or it does not. Two rules follow from how the application works:
+   *
+   *  - An attempt only rests in UNDER_REVIEW while written answers still need marking; a
+   *    fully objective paper is graded the moment it is submitted, so seeding "awaiting
+   *    marking" attempts against one would describe a state the API cannot reach.
+   *  - Papers whose results are already published stay fully objective here, so every
+   *    released mark is backed by answers an examiner actually marked.
+   */
+  const writtenBlueprints = buildWrittenBlueprints();
+  const writtenQuestions: { id: number; subjectIndex: number; type: string; marks: number }[] = [];
+  for (let subjectIndex = 0; subjectIndex < subjects.length; subjectIndex += 1) {
+    const bank = banks[subjectIndex];
+    for (const blueprint of writtenBlueprints) {
+      const info = insertQuestion.run(
+        institutionId,
+        bank.id,
+        subjects[subjectIndex].id,
+        blueprint.topic,
+        blueprint.type,
+        blueprint.text.replace('{subject}', subjects[subjectIndex].name),
+        blueprint.explanation,
+        blueprint.marks,
+        0,
+        blueprint.difficulty,
+        JSON.stringify(blueprint.tags),
+        // The same answer key the application writes for a written question.
+        JSON.stringify({ manual: true }),
+        teachers[bank.teacherIndex].userId,
+        teachers[bank.teacherIndex].userId,
+        timestamp,
+        timestamp,
+      );
+      writtenQuestions.push({
+        id: Number(info.lastInsertRowid),
+        subjectIndex,
+        type: blueprint.type,
+        marks: blueprint.marks,
+      });
+    }
+  }
+  counts.questions = createdQuestions.length + writtenQuestions.length;
+
+  // Questions as a paper reads them — a paper may override the bank's marks and penalties.
+  const questionRows = new Map(
+    (
+      db
+        .prepare(
+          'SELECT id, type, text, marks, negative_marks FROM questions WHERE institution_id = ? ORDER BY id',
+        )
+        .all(institutionId) as {
+        id: number;
+        type: string;
+        text: string;
+        marks: number;
+        negative_marks: number;
+      }[]
+    ).map((row) => [row.id, row]),
+  );
 
   // -------------------------------------------------------------------- quizzes
   const quizSeed = [
-    { subjectIndex: 0, teacherIndex: 0, classIndex: 0, title: 'Algorithms Warm-up Quiz', count: 5, minutes: 15, offset: -6 },
-    { subjectIndex: 1, teacherIndex: 1, classIndex: 1, title: 'SQL Fundamentals Check', count: 5, minutes: 20, offset: -3 },
-    { subjectIndex: 2, teacherIndex: 2, classIndex: 2, title: 'Calculus Refresher Quiz', count: 5, minutes: 15, offset: 2 },
-    { subjectIndex: 3, teacherIndex: 3, classIndex: 0, title: 'Accounting Principles Quiz', count: 5, minutes: 20, offset: 5 },
-    { subjectIndex: 4, teacherIndex: 4, classIndex: 1, title: 'Probability Basics Quiz', count: 5, minutes: 15, offset: 8 },
+    { subjectIndex: 0, teacherIndex: 0, classIndex: 0, title: 'Algorithms Warm-up Quiz', count: 5, minutes: 15, offset: -6, written: 0, markedWritten: 0, immediate: true, sitters: 6 },
+    { subjectIndex: 1, teacherIndex: 1, classIndex: 1, title: 'SQL Fundamentals Check', count: 5, minutes: 20, offset: -3, written: 1, markedWritten: 1, immediate: false, sitters: 8 },
+    { subjectIndex: 2, teacherIndex: 2, classIndex: 2, title: 'Calculus Refresher Quiz', count: 5, minutes: 15, offset: 2, written: 0, markedWritten: 0, immediate: false, sitters: 0 },
+    { subjectIndex: 3, teacherIndex: 3, classIndex: 0, title: 'Accounting Principles Quiz', count: 5, minutes: 20, offset: 5, written: 0, markedWritten: 0, immediate: false, sitters: 0 },
+    { subjectIndex: 4, teacherIndex: 4, classIndex: 1, title: 'Probability Basics Quiz', count: 5, minutes: 15, offset: 8, written: 0, markedWritten: 0, immediate: false, sitters: 0 },
   ];
 
   const quizzes = quizSeed.map((quiz, index) => {
     const subjectQuestions = createdQuestions.filter((q) => q.subjectIndex === quiz.subjectIndex);
-    const selected = subjectQuestions.slice(0, 8);
+    const selected = subjectQuestions.slice(0, quiz.count);
+    // A quiz that needs marking carries written questions from its own subject.
+    const written = writtenQuestions
+      .filter((question) => question.subjectIndex === quiz.subjectIndex)
+      .slice(0, quiz.written)
+      .map((question, position) => ({
+        questionId: question.id,
+        marks: question.marks,
+        marked: position < quiz.markedWritten,
+      }));
     const availableFrom = daysFromNow(quiz.offset - 4);
     const availableUntil = daysFromNow(quiz.offset + 14);
     // Availability drives the lifecycle state, exactly as the scheduler would derive it.
@@ -458,6 +527,11 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
         : nowMs > new Date(availableUntil).getTime()
           ? 'CLOSED'
           : 'ACTIVE';
+    const questionCount = selected.length + written.length;
+    const totalMarks = round2(
+      selected.reduce((sum, question) => sum + (questionRows.get(question.id)?.marks ?? 0), 0) +
+        written.reduce((sum, question) => sum + question.marks, 0),
+    );
 
     const info = db
       .prepare(
@@ -476,28 +550,35 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
         quiz.title,
         `Short formative assessment for ${subjects[quiz.subjectIndex].name}.`,
         'Answer all questions. You may flag questions for review before submitting.',
-        quiz.count,
+        questionCount,
         quiz.minutes,
         2,
         50,
         index % 2 === 0 ? 1 : 0,
         index % 3 === 0 ? 1 : 0,
-        1,
+        quiz.immediate ? 1 : 0,
         1,
         1,
         1,
         availableFrom,
         availableUntil,
-        index < 2 ? daysFromNow(-2) : daysFromNow(quiz.offset + 15),
+        // A paper released on submit needs no separate release date; the rest are released
+        // once their marking window has passed.
+        quiz.immediate ? null : index < 2 ? daysFromNow(-2) : daysFromNow(quiz.offset + 15),
         status,
         timestamp,
         timestamp,
       );
     const quizId = Number(info.lastInsertRowid);
+    const insertPaperQuestion = db.prepare(
+      'INSERT INTO quiz_questions (quiz_id, question_id, position, marks, negative_marks) VALUES (?,?,?,?,?)',
+    );
     selected.forEach((question, position) => {
-      db.prepare(
-        'INSERT INTO quiz_questions (quiz_id, question_id, position, marks, negative_marks) VALUES (?,?,?,?,?)',
-      ).run(quizId, question.id, position + 1, 1, 0.25);
+      const row = questionRows.get(question.id);
+      insertPaperQuestion.run(quizId, question.id, position + 1, row?.marks ?? 1, row?.negative_marks ?? 0);
+    });
+    written.forEach((question, position) => {
+      insertPaperQuestion.run(quizId, question.questionId, selected.length + position + 1, question.marks, 0);
     });
     db.prepare(
       'INSERT INTO quiz_assignments (quiz_id, class_id, assigned_by, assigned_at) VALUES (?,?,?,?)',
@@ -506,9 +587,12 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
       id: quizId,
       ...quiz,
       questionIds: selected.map((q) => q.id),
+      written,
+      totalMarks,
+      status,
+      classId: classes[quiz.classIndex].id,
       timeLimitMinutes: quiz.minutes,
       passPercentage: 50,
-      titleResolved: quiz.title,
     };
   });
   counts.quizzes = quizzes.length;
@@ -527,6 +611,10 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
       questions: 12,
       duration: 60,
       passPercent: 50,
+      // Two written questions, neither marked yet: this is the paper the marking queue is for.
+      written: 2,
+      markedWritten: 0,
+      sitters: 6,
     },
     {
       subjectIndex: 1,
@@ -540,6 +628,10 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
       questions: 10,
       duration: 90,
       passPercent: 50,
+      // Not open yet, so it carries no submissions — a paper cannot be sat before it starts.
+      written: 0,
+      markedWritten: 0,
+      sitters: 0,
     },
     {
       subjectIndex: 4,
@@ -553,17 +645,27 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
       questions: 8,
       duration: 45,
       passPercent: 45,
+      // Results are out, so every question on this paper is objective and machine-scored.
+      written: 0,
+      markedWritten: 0,
+      sitters: 10,
     },
   ];
 
   const exams = examSeed.map((exam) => {
     const subjectQuestions = createdQuestions.filter((q) => q.subjectIndex === exam.subjectIndex);
     const objective = subjectQuestions.slice(0, exam.questions);
+    const written = writtenQuestions
+      .filter((question) => question.subjectIndex === exam.subjectIndex)
+      .slice(0, exam.written)
+      .map((question, position) => ({
+        questionId: question.id,
+        marks: question.marks,
+        marked: position < exam.markedWritten,
+      }));
     const totalMarks = round2(
-      objective.reduce((sum, question) => {
-        const row = db.prepare('SELECT marks FROM questions WHERE id = ?').get(question.id) as { marks: number };
-        return sum + row.marks;
-      }, 0),
+      objective.reduce((sum, question) => sum + (questionRows.get(question.id)?.marks ?? 0), 0) +
+        written.reduce((sum, question) => sum + question.marks, 0),
     );
     const passMarks = round2((totalMarks * exam.passPercent) / 100);
 
@@ -602,6 +704,7 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
         exam.subjectIndex % 3 === 0 ? 1 : 0,
         1,
         schemeId,
+        // A published paper releases what it has; the others stay withheld until marking ends.
         exam.status === 'PUBLISHED' ? daysFromNow(exam.start + 4) : daysFromNow(exam.start + 10),
         exam.status,
         exam.status === 'PUBLISHED' ? daysFromNow(exam.start + 4) : null,
@@ -609,14 +712,15 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
         timestamp,
       );
     const examId = Number(info.lastInsertRowid);
+    const insertPaperQuestion = db.prepare(
+      'INSERT INTO exam_questions (exam_id, question_id, position, marks, negative_marks) VALUES (?,?,?,?,?)',
+    );
     objective.forEach((question, position) => {
-      const row = db.prepare('SELECT marks, negative_marks FROM questions WHERE id = ?').get(question.id) as {
-        marks: number;
-        negative_marks: number;
-      };
-      db.prepare(
-        'INSERT INTO exam_questions (exam_id, question_id, position, marks, negative_marks) VALUES (?,?,?,?,?)',
-      ).run(examId, question.id, position + 1, row.marks, row.negative_marks);
+      const row = questionRows.get(question.id);
+      insertPaperQuestion.run(examId, question.id, position + 1, row?.marks ?? 1, row?.negative_marks ?? 0);
+    });
+    written.forEach((question, position) => {
+      insertPaperQuestion.run(examId, question.questionId, objective.length + position + 1, question.marks, 0);
     });
     db.prepare('INSERT INTO exam_assignments (exam_id, class_id, assigned_by, assigned_at) VALUES (?,?,?,?)').run(
       examId,
@@ -630,19 +734,58 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
       totalMarks,
       passMarks,
       questionIds: objective.map((q) => q.id),
+      written,
       assignedClassId: classes[exam.classIndex].id,
     };
   });
   counts.exams = exams.length;
 
-  // -------------------------------------------------------- sample quiz attempts
-  const quizAttemptsCreated = createSampleQuizAttempts(db, quizzes, students, institutionId);
-  counts.quizAttempts = quizAttemptsCreated;
+  /*
+   * Sample submissions.
+   *
+   * Only papers that are genuinely open are sat: a SCHEDULED examination has not started, so
+   * seeding submissions against it would contradict the application's own "no early start"
+   * rule. Each attempt is graded through the production path and therefore always carries the
+   * result row that `submit` writes.
+   */
+  const graders = teachers.map((teacher) => ({ id: teacher.userId, name: teacher.name }));
+  const papers: SeedPaper[] = [
+    ...exams
+      .filter((exam) => exam.status === 'ACTIVE' || exam.status === 'PUBLISHED')
+      .map((exam) => ({
+        kind: 'exam' as const,
+        id: exam.id,
+        questionIds: [...exam.questionIds, ...exam.written.map((question) => question.questionId)],
+        written: exam.written,
+        totalMarks: exam.totalMarks,
+        durationMinutes: exam.duration,
+        classId: exam.assignedClassId,
+        participants: exam.sitters,
+        startedDaysAgo: exam.status === 'PUBLISHED' ? 11 : 1,
+        spreadDays: 2,
+        grader: graders[exam.teacherIndex],
+      })),
+    ...quizzes
+      .filter((quiz) => quiz.status === 'ACTIVE')
+      .map((quiz) => ({
+        kind: 'quiz' as const,
+        id: quiz.id,
+        questionIds: [...quiz.questionIds, ...quiz.written.map((question) => question.questionId)],
+        written: quiz.written,
+        totalMarks: quiz.totalMarks,
+        durationMinutes: quiz.timeLimitMinutes,
+        classId: quiz.classId,
+        participants: quiz.sitters,
+        startedDaysAgo: Math.abs(quiz.offset),
+        spreadDays: 3,
+        grader: graders[quiz.teacherIndex],
+      })),
+  ];
 
-  // -------------------------------------------------------- sample exam attempts
-  const examResult = createSampleExamAttempts(db, exams, students, institutionId);
-  counts.examAttempts = examResult.attempts;
-  counts.results = examResult.results;
+  const seeded = createSampleAttempts(db, papers, students, institutionId);
+  counts.attempts = seeded.attempts;
+  counts.results = seeded.results;
+  counts.awaiting_marking = seeded.pending;
 
   // --------------------------------------------------------------- notifications
   const notificationSeeds = [
@@ -726,290 +869,282 @@ function createGradingScheme(db: Db, institutionId: number): number {
   return schemeId;
 }
 
-function createSampleQuizAttempts(
-  db: Db,
-  quizzes: { id: number; questionIds: number[]; timeLimitMinutes: number; passPercentage: number }[],
-  students: { id: number; userId: number }[],
-  institutionId: number,
-): number {
-  let created = 0;
-  for (const quiz of quizzes.slice(0, 4)) {
-    const participants = students.slice(0, randomInt(4, 9));
-    for (const student of participants) {
-      const startedAt = daysFromNow(-5 + (created % 5), randomInt(0, 6));
-      const submittedAt = addHours(startedAt, 0.4);
-      const expiresAt = addHours(startedAt, quiz.timeLimitMinutes / 60);
-      const attemptInfo = db
-        .prepare(
-          `INSERT INTO attempts
-            (institution_id, quiz_id, student_id, attempt_no, status, started_at, expires_at, last_activity_at,
-             submitted_at, submit_reason, max_marks, created_at, updated_at)
-           VALUES (?,?,?, 1, 'SUBMITTED', ?,?,?,?, 'manual', ?,?,?)`,
-        )
-        .run(
-          institutionId,
-          quiz.id,
-          student.id,
-          startedAt,
-          expiresAt,
-          submittedAt,
-          submittedAt,
-          quiz.questionIds.length,
-          startedAt,
-          submittedAt,
-        );
-      const attemptId = Number(attemptInfo.lastInsertRowid);
-      try {
-        gradeSampleObjectiveAttempt(db, attemptId, quiz.questionIds, institutionId, quiz.passPercentage, null);
-        created += 1;
-      } catch {
-        db.prepare('DELETE FROM attempts WHERE id = ?').run(attemptId);
-      }
-    }
-  }
-  return created;
+/**
+ * A paper as it was served, with the written work it carries and which of that work has
+ * already been marked.
+ */
+interface SeedPaper {
+  kind: 'exam' | 'quiz';
+  id: number;
+  /** Every question on the paper, in the order it was served. */
+  questionIds: number[];
+  written: { questionId: number; marks: number; marked: boolean }[];
+  totalMarks: number;
+  durationMinutes: number;
+  classId: number;
+  /** How many candidates sat it (never more than the class has). */
+  participants: number;
+  startedDaysAgo: number;
+  /** Submissions are spread over this many days, so the dashboards show a real series. */
+  spreadDays: number;
+  grader: { id: number; name: string };
 }
 
-function createSampleExamAttempts(
-  db: Db,
-  exams: { id: number; questionIds: number[]; assignedClassId: number; status: string; passMarks: number; totalMarks: number }[],
-  students: { id: number; userId: number; classId: number }[],
-  institutionId: number,
-): { attempts: number; results: number } {
-  let attempts = 0;
-  let results = 0;
-
-  for (const exam of exams) {
-    const cohort = students.filter((student) => student.classId === exam.assignedClassId);
-    const participants = cohort.slice(0, Math.min(cohort.length, exam.status === 'PUBLISHED' ? cohort.length : 6));
-
-    for (const student of participants) {
-      const startedAt = exam.status === 'PUBLISHED' ? daysFromNow(-11, randomInt(1, 4)) : daysFromNow(-1, randomInt(0, 5));
-      const submittedAt = addHours(startedAt, 0.75);
-      const expiresAt = addHours(startedAt, 1.5);
-      const status = exam.status === 'PUBLISHED' ? 'GRADED' : exam.status === 'ACTIVE' ? 'UNDER_REVIEW' : 'SUBMITTED';
-
-      const attemptInfo = db
-        .prepare(
-          `INSERT INTO attempts
-            (institution_id, exam_id, student_id, attempt_no, status, started_at, expires_at, last_activity_at,
-             submitted_at, submit_reason, max_marks, created_at, updated_at)
-           VALUES (?,?,?, 1, ?, ?,?,?,?, 'manual', ?,?,?)`,
-        )
-        .run(
-          institutionId,
-          exam.id,
-          student.id,
-          status,
-          startedAt,
-          expiresAt,
-          submittedAt,
-          submittedAt,
-          exam.totalMarks,
-          startedAt,
-          submittedAt,
-        );
-      const attemptId = Number(attemptInfo.lastInsertRowid);
-      try {
-        const graded = gradeSampleObjectiveAttempt(
-          db,
-          attemptId,
-          exam.questionIds,
-          institutionId,
-          (exam.passMarks / Math.max(1, exam.totalMarks)) * 100,
-          exam,
-        );
-        attempts += 1;
-        if (graded.resultCreated) results += 1;
-      } catch {
-        db.prepare('DELETE FROM attempts WHERE id = ?').run(attemptId);
-      }
-    }
+/** A plausible candidate answer for a written question. */
+function writtenAnswerText(type: string, prompt: string, seed: number): string {
+  const first = prompt.replace(/\s+/g, ' ').replace(/\.$/, '');
+  if (type === 'ESSAY') {
+    return [
+      `${first} — answered in three parts.`,
+      'First the definition and the assumptions it rests on, because the rest of the argument only holds while those do.',
+      `Then the worked example, taken step by step, with the intermediate values checked against the expected order of magnitude (working reference ${seed}).`,
+      'Finally the limitations: one worked example shows the method is sound, but it does not by itself prove the general case.',
+    ].join('\n\n');
   }
-
-  return { attempts, results };
+  return `${first} — stated briefly, with the defining property and one worked step (working reference ${seed}).`;
 }
 
 /**
- * Generates a realistic answer sheet with a controlled mix of correct, incorrect and
- * blank answers, then runs the real grading pipeline so seeded data matches the
- * behaviour of the live application.
+ * Seeds submissions through the same code path the application uses.
+ *
+ * Answer sheets are written the way `saveAnswer` writes them, and `finaliseAttempt` then
+ * auto-grades the objective answers, totals the marks and writes the result row — so a
+ * seeded attempt is indistinguishable from one a candidate submitted, and no seeded
+ * submission can be left without the result the dashboard depends on. Papers with written
+ * work are marked by an examiner through `saveGrade`/`finalizeGrading`, which also leaves the
+ * `grading_history` trail the marking interface shows; anything left unmarked stays in
+ * UNDER_REVIEW with a PENDING result, which is exactly how the API parks it.
  */
-function gradeSampleObjectiveAttempt(
+function createSampleAttempts(
   db: Db,
-  attemptId: number,
-  questionIds: number[],
+  papers: SeedPaper[],
+  students: { id: number; userId: number; name: string; classId: number }[],
   institutionId: number,
-  passPercentage: number,
-  exam: { id: number; passMarks: number; totalMarks: number } | null,
-): { resultCreated: boolean } {
-  const attempt = db.prepare('SELECT * FROM attempts WHERE id = ?').get(attemptId) as any;
-  const timestamp = attempt.submitted_at;
-  let maxMarks = 0;
+): { attempts: number; results: number; pending: number } {
+  let attempts = 0;
+  let results = 0;
+  let pending = 0;
 
-  questionIds.forEach((questionId, index) => {
-    const question = db.prepare('SELECT * FROM questions WHERE id = ?').get(questionId) as any;
-    if (!question) return;
-    const options = db
-      .prepare('SELECT label, text, is_correct FROM question_options WHERE question_id = ? ORDER BY position')
-      .all(questionId) as { label: string; text: string; is_correct: number }[];
-    const config = JSON.parse(question.answer_config ?? '{}');
-    const correctLabels = (config.correctOptions ?? (options.filter((o) => o.is_correct).map((o) => o.label))) as string[];
-
-    maxMarks += question.marks;
-
-    db.prepare(
-      `INSERT INTO attempt_questions
-        (attempt_id, question_id, position, question_type, question_text, marks, negative_marks, is_objective, correct_answer, snapshot)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
-    ).run(
-      attemptId,
-      questionId,
-      index + 1,
-      question.type,
-      question.text,
-      question.marks,
-      question.negative_marks,
-      ['MCQ', 'TRUE_FALSE', 'FILL_BLANK'].includes(question.type) ? 1 : 0,
-      JSON.stringify(config),
-      JSON.stringify({
-        options: options.map((o) => ({ label: o.label, text: o.text })),
-        answerConfig: config,
-        explanation: question.explanation,
-        topic: question.topic,
-        difficulty: question.difficulty,
-      }),
-    );
-
-    const dice = rand();
-    if (dice > 0.92) return; // left unanswered
-    const chooseCorrect = dice < 0.62;
-    const labels = options.map((o) => o.label);
-    const wrongLabels = labels.filter((label) => !correctLabels.includes(label));
-    const selected = chooseCorrect
-      ? correctLabels
-      : wrongLabels.length
-        ? [pick(wrongLabels)]
-        : [pick(labels)];
-
-    db.prepare(
-      `INSERT INTO answers (attempt_id, question_id, selected_options, is_correct, awarded_marks, max_marks,
-                            auto_graded, graded_at, save_count, created_at, updated_at)
-       VALUES (?,?,?,?,?,?, 1, ?, ?, ?, ?)`,
-    ).run(
-      attemptId,
-      questionId,
-      JSON.stringify(selected),
-      0,
-      0,
-      question.marks,
-      timestamp,
-      randomInt(1, 4),
-      attempt.started_at,
-      timestamp,
-    );
-  });
-
-  db.prepare('UPDATE attempts SET max_marks = ? WHERE id = ?').run(maxMarks, attemptId);
-
-  // Deterministic grading through the production code path.
-  const answerRows = db
-    .prepare(
-      `SELECT an.id, an.question_id, an.selected_options, an.answer_text, aq.question_type, aq.marks,
-              aq.negative_marks, aq.correct_answer, aq.is_objective
-         FROM answers an
-         JOIN attempt_questions aq ON aq.attempt_id = an.attempt_id AND aq.question_id = an.question_id
-        WHERE an.attempt_id = ?`,
-    )
-    .all(attemptId) as any[];
-
-  let objective = 0;
-  for (const answer of answerRows) {
-    if (!answer.is_objective) continue;
-    const key = JSON.parse(answer.correct_answer ?? '{}') as AnswerKey;
-    const result = gradeObjective(
-      answer.question_type,
-      { selectedOptions: JSON.parse(answer.selected_options ?? '[]'), answerText: answer.answer_text },
-      key,
-      answer.marks,
-      answer.negative_marks,
-    );
-    objective += result.awarded;
-    db.prepare('UPDATE answers SET is_correct = ?, awarded_marks = ?, auto_graded = 1, graded_at = ? WHERE id = ?').run(
-      result.isCorrect ? 1 : 0,
-      result.awarded,
-      timestamp,
-      answer.id,
-    );
-  }
-
-  objective = round2(objective);
-  const scheme = resolveScheme(db, institutionId, null);
-  const totalMarks = exam ? exam.totalMarks : maxMarks;
-  const finalScore = computeFinalScore({
-    totalMarks,
-    obtainedMarks: objective,
-    passMark: exam ? exam.passMarks : round2((passPercentage / 100) * maxMarks),
-    bands: scheme.bands,
-  });
-
-  const isPublished = attempt.status === 'GRADED';
-  db.prepare(
-    `UPDATE attempts SET objective_marks = ?, total_marks = ?, obtained_marks = ?, percentage = ?, grade = ?,
-            passed = ?, graded_at = ?, result_published_at = ?, updated_at = ?
-      WHERE id = ?`,
-  ).run(
-    objective,
-    totalMarks,
-    objective,
-    finalScore.percentage,
-    finalScore.grade,
-    finalScore.outcome === 'PASSED' ? 1 : 0,
-    timestamp,
-    isPublished ? timestamp : null,
-    timestamp,
-    attemptId,
-  );
-
-  if (attempt.status === 'UNDER_REVIEW' || attempt.status === 'SUBMITTED') return { resultCreated: false };
-
-  try {
-    db.prepare(
-      `INSERT INTO results
-        (attempt_id, institution_id, exam_id, quiz_id, student_id, subject_id, total_marks, obtained_marks,
-         percentage, grade, points, outcome, scheme_id, is_published, published_at, created_at, updated_at)
-       VALUES (?,?,
-               (SELECT exam_id FROM attempts WHERE id = ?),
-               (SELECT quiz_id FROM attempts WHERE id = ?),
-               (SELECT student_id FROM attempts WHERE id = ?),
-               COALESCE((SELECT subject_id FROM exams WHERE id = (SELECT exam_id FROM attempts WHERE id = ?)),
-                        (SELECT subject_id FROM quizzes WHERE id = (SELECT quiz_id FROM attempts WHERE id = ?))),
-               ?,?,?,?,?,?,?,?,?,?,?)`,
-    ).run(
-      attemptId,
+  for (const paper of papers) {
+    if (!paper.participants) continue;
+    const cohort = students.filter((student) => student.classId === paper.classId).slice(0, paper.participants);
+    const actor: GradingActor = {
+      id: paper.grader.id,
       institutionId,
-      attemptId,
-      attemptId,
-      attemptId,
-      attemptId,
-      attemptId,
-      finalScore.totalMarks,
-      finalScore.obtainedMarks,
-      finalScore.percentage,
-      finalScore.grade,
-      finalScore.points,
-      finalScore.outcome,
-      scheme.schemeId,
-      isPublished ? 1 : 0,
-      isPublished ? timestamp : null,
-      timestamp,
-      timestamp,
-    );
-  } catch {
-    return { resultCreated: false };
+      roleCode: 'teacher',
+      fullName: paper.grader.name,
+    };
+
+    cohort.forEach((student, index) => {
+      const startedAt = daysFromNow(-(paper.startedDaysAgo + (index % paper.spreadDays)), randomInt(1, 6));
+      const durationHours = paper.durationMinutes / 60;
+      const expiresAt = addHours(startedAt, durationHours);
+      const submittedAt = addHours(startedAt, Math.max(0.25, Math.min(durationHours, 0.9)));
+
+      const attemptId = Number(
+        db
+          .prepare(
+            `INSERT INTO attempts
+              (institution_id, exam_id, quiz_id, student_id, attempt_no, status, started_at, expires_at,
+               last_activity_at, submitted_at, submit_reason, max_marks, created_at, updated_at)
+             VALUES (?,?,?,?, 1, 'SUBMITTED', ?,?,?,?, 'manual', ?,?,?)`,
+          )
+          .run(
+            institutionId,
+            paper.kind === 'exam' ? paper.id : null,
+            paper.kind === 'quiz' ? paper.id : null,
+            student.id,
+            startedAt,
+            expiresAt,
+            submittedAt,
+            submittedAt,
+            paper.totalMarks,
+            startedAt,
+            submittedAt,
+          ).lastInsertRowid,
+      );
+
+      // ------------------------------------------------------- the paper, frozen per attempt
+      const insertPaper = db.prepare(
+        `INSERT INTO attempt_questions
+          (attempt_id, question_id, position, question_type, question_text, marks, negative_marks,
+           is_objective, correct_answer, snapshot)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      );
+      const insertAnswer = db.prepare(
+        `INSERT INTO answers
+          (attempt_id, question_id, selected_options, answer_text, is_flagged, max_marks, save_count, created_at, updated_at)
+         VALUES (?,?,?,?, 0, ?, ?,?,?)`,
+      );
+
+      paper.questionIds.forEach((questionId, position) => {
+        const question = db.prepare('SELECT * FROM questions WHERE id = ?').get(questionId) as any;
+        const options = db
+          .prepare('SELECT label, text, is_correct FROM question_options WHERE question_id = ? ORDER BY position')
+          .all(questionId) as { label: string; text: string; is_correct: number }[];
+        const config = parseAnswerConfig(question.answer_config) as AnswerKey & Record<string, unknown>;
+        const correct: AnswerKey = {
+          correctOptions: (config.correctOptions ?? []).map((label) => String(label).toUpperCase()),
+          acceptedAnswers: config.acceptedAnswers ?? [],
+          caseSensitive: Boolean(config.caseSensitive),
+          allowPartial: Boolean(config.allowPartial),
+          numericTolerance: config.numericTolerance ?? 0,
+        };
+        insertPaper.run(
+          attemptId,
+          questionId,
+          position + 1,
+          question.type,
+          question.text,
+          question.marks,
+          question.negative_marks,
+          isObjectiveType(question.type) ? 1 : 0,
+          JSON.stringify(correct),
+          JSON.stringify({
+            options: options.map((option) => ({ label: option.label, text: option.text })),
+            answerConfig: config,
+            explanation: question.explanation,
+            topic: question.topic,
+            difficulty: question.difficulty,
+          }),
+        );
+
+        if (!isObjectiveType(question.type)) return;
+
+        // Not every candidate answers every question; a skipped question simply has no row
+        // and scores nothing, exactly as the grader treats it.
+        if (rand() > 0.95) return;
+        const labels = options.map((option) => option.label);
+        const correctLabels = correct.correctOptions ?? [];
+        const wrongLabels = labels.filter((label) => !correctLabels.includes(label));
+        const gotItRight = rand() < 0.72;
+        const selected = correctLabels.length
+          ? gotItRight
+            ? correctLabels
+            : [pick(wrongLabels.length ? wrongLabels : labels)]
+          : [];
+        insertAnswer.run(
+          attemptId,
+          questionId,
+          JSON.stringify(selected),
+          // A fill-in-the-blank answer is text, not a selection.
+          question.type === 'FILL_BLANK'
+            ? gotItRight
+              ? correct.acceptedAnswers?.[0] ?? 'answer'
+              : 'not sure'
+            : null,
+          question.marks,
+          randomInt(1, 4),
+          startedAt,
+          submittedAt,
+        );
+      });
+
+      // -------------------------- written answers: handed in, and marked only if they should be
+      for (const plan of paper.written) {
+        const question = db.prepare('SELECT type, text FROM questions WHERE id = ?').get(plan.questionId) as {
+          type: string;
+          text: string;
+        };
+        insertAnswer.run(
+          attemptId,
+          plan.questionId,
+          '[]',
+          writtenAnswerText(question.type, question.text, attempts + plan.questionId),
+          plan.marks,
+          1,
+          startedAt,
+          submittedAt,
+        );
+      }
+
+      // Auto-grades the objective answers, totals the marks, writes the result row, and
+      // either completes the attempt or parks it in review with a PENDING result.
+      const submission = finaliseAttempt(db, null, attemptId);
+
+      if (submission.requiresManualGrading) {
+        if (!paper.written.every((plan) => plan.marked)) {
+          pending += 1; // left in the marking queue
+        } else {
+          for (const plan of paper.written) {
+            const answer = db
+              .prepare('SELECT id FROM answers WHERE attempt_id = ? AND question_id = ?')
+              .get(attemptId, plan.questionId) as { id: number };
+            const awarded = round2(plan.marks * (0.6 + rand() * 0.3));
+            saveGrade(db, actor, attemptId, answer.id, {
+              awardedMarks: awarded,
+              comment:
+                awarded >= plan.marks * 0.8
+                  ? 'Well argued and correctly applied; keep the working visible for partial credit.'
+                  : 'The method is right but the working is thin — state the assumptions next time.',
+            });
+          }
+          finalizeGrading(db, actor, attemptId);
+        }
+      }
+
+      attempts += 1;
+      results += 1;
+    });
   }
 
-  return { resultCreated: true };
+  return { attempts, results, pending };
+}
+
+interface WrittenBlueprint {
+  type: 'SHORT_ANSWER' | 'ESSAY';
+  topic: string;
+  text: string;
+  marks: number;
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD';
+  explanation: string;
+  tags: string[];
+}
+
+/**
+ * Four written blueprints per subject — one short answer and one essay, twice — so the
+ * marking queue, the manual-grading history and the written-answer review screens all have
+ * genuine, ungraded candidate work to work with.
+ */
+function buildWrittenBlueprints(): WrittenBlueprint[] {
+  return [
+    {
+      type: 'SHORT_ANSWER',
+      topic: 'Complexity and cost',
+      text: 'State the average-case cost of the core operation you would use in {subject}, and justify the answer in two or three sentences.',
+      marks: 5,
+      difficulty: 'MEDIUM',
+      explanation: 'Award full marks for the correct growth rate together with a one-line justification of why it holds.',
+      tags: ['written', 'analysis'],
+    },
+    {
+      type: 'ESSAY',
+      topic: 'Trade-offs and design',
+      text: 'Discuss how {subject} balances competing constraints in practice. Support your answer with at least two worked examples and state where your reasoning stops being valid.',
+      marks: 15,
+      difficulty: 'HARD',
+      explanation: 'Award marks for a correct argument, two concrete examples and an explicit statement of the limits of the approach.',
+      tags: ['written', 'essay'],
+    },
+    {
+      type: 'SHORT_ANSWER',
+      topic: 'Method and verification',
+      text: 'Show the two steps you would take to solve a standard problem in {subject}, and say how you would check that the result is right.',
+      marks: 5,
+      difficulty: 'MEDIUM',
+      explanation: 'Award marks for a correct method and for naming a real verification step.',
+      tags: ['written', 'method'],
+    },
+    {
+      type: 'ESSAY',
+      topic: 'Theory in practice',
+      text: 'Explain how a core idea from {subject} is applied outside the classroom, and where that application breaks down.',
+      marks: 15,
+      difficulty: 'MEDIUM',
+      explanation: 'Award marks for correct use of the concept, a concrete case, and a stated limitation.',
+      tags: ['written', 'application'],
+    },
+  ];
 }
 
 interface Blueprint {

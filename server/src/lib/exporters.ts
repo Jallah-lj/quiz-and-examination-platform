@@ -38,11 +38,29 @@ export function toCsv(table: ReportTable): string {
   return [...titleBlock, header, ...lines, ...summaryLines].join('\r\n');
 }
 
+/**
+ * Excel rejects a worksheet name containing any of `* ? : \ / [ ]`, refuses names longer
+ * than 31 characters, and refuses to open a workbook with a blank name. Report titles are
+ * written for people ("Pass / fail report"), so the title is cleaned rather than the
+ * report being renamed: the offending characters become spaces and the result is trimmed.
+ */
+export function sheetName(title: string): string {
+  const cleaned = title
+    // eslint-disable-next-line no-control-regex -- Excel also rejects control characters.
+    .replace(/[*?:\\/[\]\u0000-\u001f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^'+|'+$/g, '')
+    .slice(0, 31)
+    .trim();
+  return cleaned || 'Report';
+}
+
 export async function toXlsx(table: ReportTable): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'ExamSys';
   workbook.created = new Date(table.generatedAt);
-  const sheet = workbook.addWorksheet(table.title.slice(0, 28) || 'Report');
+  const sheet = workbook.addWorksheet(sheetName(table.title));
 
   sheet.mergeCells(1, 1, 1, Math.max(1, table.columns.length));
   const titleCell = sheet.getCell(1, 1);
