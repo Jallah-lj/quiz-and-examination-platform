@@ -14,6 +14,13 @@ import {
 } from './charts';
 
 /** Pretend the panel is a given number of CSS pixels wide, as a real layout would. */
+/** The date labels of a trend axis, as opposed to its y-axis figures. */
+function axisDates(container: HTMLElement): SVGTextElement[] {
+  return Array.from(container.querySelectorAll<SVGTextElement>('.chart__axis')).filter((tick) =>
+    /^\d\d-\d\d$/.test(tick.textContent ?? ''),
+  );
+}
+
 function withPanelWidth(width: number) {
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
     width,
@@ -614,5 +621,181 @@ describe('ranked bars', () => {
     render(<BarList ariaLabel="Attempts by institution" items={[]} emptyLabel="No institution has recorded any attempt yet." />);
     expect(screen.getByText('No institution has recorded any attempt yet.')).toBeInTheDocument();
     expect(document.querySelector('.rank')).toBeNull();
+  });
+});
+
+describe('charts stay inside the box they are given', () => {
+  const grades = [
+    { label: 'A', value: 3 },
+    { label: 'B', value: 4 },
+    { label: 'C', value: 5 },
+    { label: 'D', value: 6 },
+    { label: 'F', value: 4 },
+  ];
+  /**
+   * Panel widths a card can really be, from a dense two-column card on a small phone up to
+   * a wide dashboard column. The narrow end matters: a fixed 140px ring floor only showed
+   * itself below 140px, which is exactly why it went unnoticed.
+   */
+  const WIDTHS = [120, 140, 200, 240, 280, 300, 320, 360, 420, 560, 760, 900, 1200];
+
+  it.each(WIDTHS)('draws the ring no wider than the %ipx it was measured in', (width) => {
+    withPanelWidth(width);
+    const { container } = render(<DonutChart ariaLabel="Grade distribution" data={grades} />);
+    const svg = container.querySelector('svg.chart__donut') as SVGSVGElement;
+    const drawn = Number(svg.getAttribute('width'));
+    // A fixed floor used to make this wider than the card, so the ring was painted outside it.
+    expect(drawn).toBeLessThanOrEqual(width);
+    expect(drawn).toBeGreaterThanOrEqual(96);
+    // The stroke has to leave a visible hole, or a small ring reads as a filled disc.
+    const strokeWidth = Number(svg.querySelector('circle')?.getAttribute('stroke-width'));
+    expect(strokeWidth).toBeLessThan(drawn / 2);
+  });
+
+  it.each(WIDTHS)('lays every one of thirty days out as its own column in a %ipx panel', (width) => {
+    withPanelWidth(width);
+    const { container } = render(
+      <BarChart
+        ariaLabel="Submissions per day"
+        data={Array.from({ length: 30 }, (_, index) => ({
+          label: `09-${String(index + 1).padStart(2, '0')}`,
+          value: index % 7,
+        }))}
+      />,
+    );
+    // The columns are the units that shrink; the stylesheet guarantees they may (see
+    // styles/layout.test.ts, which reads app.css because jsdom applies no stylesheet).
+    expect(container.querySelectorAll('.chart__column')).toHaveLength(30);
+    expect(container.querySelectorAll('.chart__bar')).toHaveLength(30);
+  });
+
+  it.each(WIDTHS)('fits the stacked and ranked charts into a %ipx panel', (width) => {
+    withPanelWidth(width);
+    const { container } = render(
+      <>
+        <StackedBarChart
+          ariaLabel="Sign-ins per day"
+          series={[
+            { key: 'ok', label: 'Successful', tone: 'success' },
+            { key: 'bad', label: 'Failed', tone: 'danger' },
+          ]}
+          data={Array.from({ length: 14 }, (_, index) => ({ label: `09-${index + 1}`, values: [index, index % 3] }))}
+        />
+        <BarList
+          ariaLabel="Attempts by institution"
+          items={[
+            { label: 'Northgate Institute of Technology', value: 53 },
+            { label: 'Muhanga Polytechnic', value: 12 },
+          ]}
+        />
+      </>,
+    );
+    expect(container.querySelectorAll('.chart__stack')).toHaveLength(14);
+    expect(container.querySelectorAll('.rank__fill')).toHaveLength(2);
+  });
+});
+
+describe('drawn geometry never exceeds the box it was measured in', () => {
+  const month = Array.from({ length: 30 }, (_, index) => ({
+    label: `09-${String(index + 1).padStart(2, '0')}`,
+    value: index % 5,
+  }));
+  const scores = month.map((point, index) => ({ label: point.label, value: 40 + (index % 7) * 6 }));
+
+  /** Every x the path visits, plus the right edge of every shape that carries a width. */
+  const xCoordinates = (container: HTMLElement) => {
+    const xs: number[] = [];
+    for (const path of Array.from(container.querySelectorAll('path'))) {
+      const d = path.getAttribute('d') ?? '';
+      for (const match of d.matchAll(/[ML](-?[\d.]+)/g)) xs.push(Number(match[1]));
+    }
+    for (const node of Array.from(container.querySelectorAll('[x]'))) {
+      const x = Number(node.getAttribute('x'));
+      if (Number.isFinite(x)) xs.push(x);
+    }
+    for (const node of Array.from(container.querySelectorAll('[cx]'))) {
+      const cx = Number(node.getAttribute('cx'));
+      const r = Number(node.getAttribute('r') ?? 0);
+      if (Number.isFinite(cx)) xs.push(cx - r, cx + r);
+    }
+    return xs;
+  };
+
+  const SVGS = [
+    ['TrendChart', month, (data: typeof month) => <TrendChart ariaLabel="Submissions over time" data={data} />],
+    ['LineChart', scores, (data: typeof month) => <LineChart ariaLabel="Score progression" data={data} />],
+  ] as const;
+
+  it.each(SVGS)('keeps every point of a %s inside its viewBox at any width', (_name, data, draw) => {
+    for (const width of [120, 200, 240, 360, 560, 900, 1200]) {
+      withPanelWidth(width);
+      const { container, unmount } = render(draw(data as typeof month));
+      const svg = container.querySelector('svg') as SVGSVGElement;
+      const viewBoxWidth = Number((svg.getAttribute('viewBox') ?? '').split(/\s+/)[2]);
+      // A viewBox narrower than the box it was measured in is the same clipping, one step on.
+      expect(viewBoxWidth).toBe(width);
+      const xs = xCoordinates(container);
+      expect(xs.length).toBeGreaterThan(0);
+      // SVG clips at the viewBox, so a coordinate past the edge is a point drawn outside the
+      // card — exactly the picture the containment guarantee exists to prevent.
+      expect(Math.max(...xs), `a point was drawn past the right edge at ${width}px`).toBeLessThanOrEqual(viewBoxWidth);
+      unmount();
+    }
+  });
+});
+
+describe('the trend keeps its labels inside the plot', () => {
+  /** A month whose busiest day is the last one — the worst case for a centred label. */
+  const month = Array.from({ length: 30 }, (_, index) => ({
+    label: `09-${String(index + 1).padStart(2, '0')}`,
+    value: index === 29 ? 9 : index % 5,
+  }));
+
+  it('anchors the first and last axis dates inward so neither hangs past the panel', () => {
+    withPanelWidth(560);
+    // Seven days: the axis has room to label every one, so both ends of the series are drawn.
+    const week = month.slice(0, 7);
+    const { container } = render(<TrendChart ariaLabel="Submissions over time" data={week} />);
+    const dates = axisDates(container);
+    expect(dates).toHaveLength(7);
+    // A centred label at either end would be painted half outside the figure.
+    expect(dates[0].getAttribute('text-anchor')).toBe('start');
+    expect(dates[dates.length - 1].getAttribute('text-anchor')).toBe('end');
+    // Everything in between stays under its own point.
+    for (const middle of dates.slice(1, -1)) expect(middle.getAttribute('text-anchor')).toBe('middle');
+  });
+
+  it('anchors the newest date inward on a month-long axis, where labels are thinned', () => {
+    withPanelWidth(560);
+    const { container } = render(<TrendChart ariaLabel="Submissions over time" data={month} />);
+    const dates = axisDates(container);
+    // Thinned ticks start at the newest day and step back, so the last date is the one that
+    // would otherwise overhang the right edge of the plot.
+    expect(dates[dates.length - 1].getAttribute('text-anchor')).toBe('end');
+    for (const date of dates.slice(0, -1)) expect(date.getAttribute('text-anchor')).toBe('middle');
+  });
+
+  it('anchors a peak label that sits on the last day to the left of its point', () => {
+    withPanelWidth(560);
+    const { container } = render(<TrendChart ariaLabel="Submissions over time" data={month} />);
+    const peak = container.querySelector<SVGTextElement>('.trend__peak');
+    expect(peak?.textContent).toBe('9');
+    // Left-anchored: the figure is drawn back towards the plot instead of over the card edge.
+    expect(peak?.getAttribute('text-anchor')).toBe('end');
+  });
+
+  it('keeps the readout inset from both edges of a narrow panel', async () => {
+    const user = userEvent.setup();
+    withPanelWidth(240);
+    const { container } = render(<TrendChart ariaLabel="Submissions over time" data={month} />);
+    const hits = container.querySelectorAll('.trend__hit');
+    const left = () => Number.parseFloat((container.querySelector('.trend__tooltip') as HTMLElement).style.left);
+
+    await user.hover(hits[0] as Element);
+    // Centred on the point, so the inset must be at least half the readout's own width.
+    expect(left()).toBeGreaterThanOrEqual(64);
+    await user.unhover(hits[0] as Element);
+    await user.hover(hits[hits.length - 1] as Element);
+    expect(left()).toBeLessThanOrEqual(240 - 64);
   });
 });

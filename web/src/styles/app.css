@@ -756,7 +756,7 @@ table.data-table {
 .progress__bar--danger { background: var(--red-600); }
 
 /* ------------------------------------------------------------------- charts */
-.chart { width: 100%; display: block; }
+.chart { width: 100%; max-width: 100%; min-width: 0; display: block; }
 .chart-legend { display: flex; gap: 0.9rem; flex-wrap: wrap; font-size: 0.8rem; color: var(--ink-600); }
 .chart-legend__item { display: flex; align-items: center; gap: 0.35rem; }
 .chart-legend__swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
@@ -1215,7 +1215,7 @@ table.data-table {
 
 .exam-intro { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; }
 .exam-intro h2 { margin-bottom: 0.35rem; }
-.exam-intro__facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; margin: 1.1rem 0; }
+.exam-intro__facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 0.75rem; margin: 1.1rem 0; }
 .exam-intro__fact { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.65rem 0.8rem; }
 .exam-intro__fact dt { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-500); }
 .exam-intro__fact dd { margin: 0.15rem 0 0; font-weight: 600; }
@@ -1264,7 +1264,7 @@ table.data-table {
 /* ------------------------------------------------------------ result summary */
 .result-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
   gap: 0.75rem;
   margin-bottom: 1rem;
 }
@@ -1717,6 +1717,8 @@ table.data-table {
   align-items: start;
   margin-bottom: 1.1rem;
 }
+/* A grid item defaults to its min-content width; charts and tables must be able to shrink. */
+.split-2 > * { min-width: 0; }
 
 /*
  * The dashboard's two chart panels. The daily series carries thirty columns and needs
@@ -1738,6 +1740,7 @@ table.data-table {
 }
 .dashboard-charts > .card > .card__body {
   flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -1756,7 +1759,7 @@ table.data-table {
   gap: 0.9rem;
   margin-bottom: 1.1rem;
 }
-.stat-grid--compact { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.75rem; }
+.stat-grid--compact { grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 0.75rem; }
 .stat-grid--compact .stat-card { padding: 0.8rem 0.9rem; }
 
 .table-actions { display: inline-flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; justify-content: flex-end; }
@@ -1912,11 +1915,11 @@ table.data-table {
 
 .checkbox-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   gap: 0.5rem;
   margin: 0.6rem 0;
 }
-.checkbox-grid--dense { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0.35rem; }
+.checkbox-grid--dense { grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); gap: 0.35rem; }
 .checkbox-card {
   display: flex;
   align-items: flex-start;
@@ -1938,7 +1941,7 @@ table.data-table {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
   gap: 0.5rem 1rem;
   margin: 0.5rem 0 0.9rem;
 }
@@ -2310,7 +2313,7 @@ table.data-table {
 
 .exam-submitted__scores {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr));
   gap: 0.75rem;
   margin: 1.2rem 0;
 }
@@ -2397,16 +2400,28 @@ table.data-table {
  * panel that keeps them a single readable unit instead of pinning the legend to the far
  * edge, and on a narrow one the pair simply fills the width.
  */
+/*
+ * The ring is a fixed-size SVG, so its track must be allowed to shrink and the legend must
+ * give up its automatic minimum. Left alone, the ring's px width plus the legend's
+ * min-content width exceeded a narrow card and the pair was painted outside the box.
+ */
 .chart--donut {
   display: grid;
-  grid-template-columns: auto minmax(0, 440px);
+  grid-template-columns: minmax(0, auto) minmax(0, 440px);
   align-items: center;
   justify-content: center;
   gap: 0.75rem 1.75rem;
+  max-width: 100%;
 }
-.chart__donut { display: block; flex: 0 0 auto; }
+.chart--donut > .chart__donut { display: block; flex: 0 0 auto; max-width: 100%; height: auto; }
+.chart--donut > .chart__legend { min-width: 0; }
 .chart-empty { color: var(--ink-500); font-size: 0.86rem; padding: 1.2rem 0; text-align: center; }
-.chart__bars { display: flex; align-items: flex-end; gap: 0.25rem; padding: 0.5rem 0 0; border-bottom: 1px solid var(--border); }
+/*
+ * Bars are laid out in a nowrap flex row. The columns can shrink, but their labels are
+ * `nowrap`, and hidden ones still occupy layout — so the row clips horizontally rather
+ * than letting an invisible label push the card's content outside it.
+ */
+.chart__bars { display: flex; align-items: flex-end; gap: 0.25rem; padding: 0.5rem 0 0; border-bottom: 1px solid var(--border); overflow-x: clip; }
 .chart__column { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; min-width: 0; }
 .chart__bar { width: 100%; min-width: 3px; max-width: 46px; background: var(--navy-500); border-radius: 2px 2px 0 0; }
 .chart__column:hover .chart__bar { filter: brightness(0.9); }
@@ -2416,6 +2431,9 @@ table.data-table {
   color: var(--ink-600);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  /* Never wider than its own column: a figure that does not fit is clipped, not spilled. */
+  max-width: 100%;
+  overflow: hidden;
 }
 .chart__label {
   font-size: 0.7rem;
@@ -2425,6 +2443,8 @@ table.data-table {
      row height stable without printing anything. */
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  max-width: 100%;
+  overflow: hidden;
 }
 .chart__value--hidden, .chart__label--hidden { visibility: hidden; }
 .chart__summary { margin: 0.55rem 0 0; font-size: 0.78rem; color: var(--ink-500); }
@@ -2466,7 +2486,7 @@ table.data-table {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(205px, 100%), 1fr));
   gap: 0.15rem 1.1rem;
   align-content: center;
   min-width: 0;
@@ -2535,7 +2555,7 @@ table.data-table {
   flex-wrap: wrap;
   gap: 0.3rem 1.4rem;
 }
-.chart__key li { display: flex; align-items: center; gap: 0.45rem; font-size: 0.82rem; min-width: 0; }
+.chart__key li { display: flex; align-items: center; gap: 0.45rem; font-size: 0.82rem; min-width: 0; max-width: 100%; }
 .chart__key-label { color: var(--ink-600); font-weight: 600; }
 .chart__key-value { color: var(--ink-900); font-weight: 600; font-variant-numeric: tabular-nums; }
 
@@ -2547,7 +2567,7 @@ table.data-table {
 .chart--rank .rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.85rem; }
 .rank__row { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
 .rank__head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; min-width: 0; }
-.rank__label { font-size: 0.86rem; font-weight: 600; color: var(--ink-900); overflow-wrap: anywhere; }
+.rank__label { font-size: 0.86rem; font-weight: 600; color: var(--ink-900); overflow-wrap: anywhere; min-width: 0; }
 .rank__value { font-size: 0.86rem; font-weight: 600; color: var(--ink-700); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rank__meta { font-size: 0.76rem; color: var(--ink-500); }
 .rank__track { display: block; height: 8px; border-radius: 999px; background: var(--ink-100); overflow: hidden; }
@@ -2566,7 +2586,7 @@ table.data-table {
  */
 .metric-band {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(168px, 100%), 1fr));
   /* The 1px grid gap shows the border colour through, which draws the hairline dividers
      between the figures whatever the band wraps to. */
   gap: 1px;
@@ -2620,7 +2640,13 @@ table.data-table {
  */
 .chart--trend { display: block; }
 .trend { position: relative; }
-.trend__svg { overflow: visible; }
+/*
+ * The plot is clipped to its own box. Edge labels are anchored inward in TrendChart (a figure
+ * centred on the last day used to hang half its width past the panel), so nothing legitimate
+ * is cut — but a label that ever did overhang is trimmed at the card's edge rather than
+ * painted across the panel beside it.
+ */
+.trend__svg { overflow: hidden; }
 .trend__svg:focus-visible { outline-offset: 4px; }
 .trend__hit { fill: transparent; cursor: crosshair; }
 .trend__guide { stroke: var(--chart-grid-strong); stroke-width: 1; stroke-dasharray: 3 3; }
@@ -2637,6 +2663,9 @@ table.data-table {
   position: absolute;
   top: 0;
   min-width: 6.5rem;
+  /* Bounded by the panel as well as by its own inset, so a narrow card trims the readout at
+     its own edge instead of letting it spill over the panel beside it. */
+  max-width: 100%;
   z-index: 2;
   transform: translateX(-50%);
   display: flex;

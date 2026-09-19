@@ -272,7 +272,9 @@ export function TrendChart({
   const padding = { top: 22, right: 12, bottom: 26, left: 34 };
   // A phone card gets a shorter plot so the panel does not push the page around.
   const plot = width < 460 ? Math.min(height, 168) : height;
-  const plotWidth = Math.max(80, width - padding.left - padding.right);
+  // Never a floor: a plot wider than the box it was measured in would draw past the card, so
+  // the padding is simply taken off whatever width the card actually has.
+  const plotWidth = Math.max(0, width - padding.left - padding.right);
   const plotHeight = plot - padding.top - padding.bottom;
   const baseline = padding.top + plotHeight;
   const peakValue = Math.max(...data.map((point) => point.value));
@@ -301,6 +303,20 @@ export function TrendChart({
   // Below the dot keeps the figure clear of the top of the plot; above it would sit on
   // the highest gridline.
   const peakLabelY = Math.min(baseline - 3, points[peakIndex].y + 15);
+  /*
+   * Text centred on a point hangs half its own width past that point, so a label on the first
+   * or last day would be painted outside the panel. Edge labels are anchored inward instead,
+   * which is also how their axis reads: the leftmost date sits to the right of its point and
+   * the rightmost to the left of its.
+   */
+  const anchorFor = (index: number): 'start' | 'middle' | 'end' =>
+    index === 0 ? 'start' : index === points.length - 1 ? 'end' : 'middle';
+  /*
+   * Half the readout's own width — a 6.5rem min-width plus its padding is about 122px, so 61
+   * is the least inset that cannot spill; 64 keeps a round number and a little margin. The
+   * readout is centred on its point, so that is exactly the inset the clamp needs at each end.
+   */
+  const TOOLTIP_INSET = 64;
 
   const step = (direction: -1 | 1) => {
     const last = data.length - 1;
@@ -377,7 +393,12 @@ export function TrendChart({
             ) : null,
           )}
           {showPeakLabel ? (
-            <text x={points[peakIndex].x} y={peakLabelY} textAnchor="middle" className="trend__peak">
+            <text
+              x={points[peakIndex].x}
+              y={peakLabelY}
+              textAnchor={anchorFor(peakIndex)}
+              className="trend__peak"
+            >
               {points[peakIndex].value}
               {valueSuffix}
             </text>
@@ -387,7 +408,7 @@ export function TrendChart({
               key={`tick-${points[index].label}`}
               x={points[index].x}
               y={plot - 8}
-              textAnchor="middle"
+              textAnchor={anchorFor(index)}
               className="chart__axis"
             >
               {points[index].label}
@@ -412,9 +433,12 @@ export function TrendChart({
         {current ? (
           <div
             className="trend__tooltip"
-            /* Kept clear of both edges: the card is centred, so half the readout width is
-               the least inset that cannot spill outside the panel. */
-            style={{ left: `${Math.max(64, Math.min(Math.max(64, width - 64), current.x))}px` }}
+            style={{
+              left: `${Math.max(
+                TOOLTIP_INSET,
+                Math.min(Math.max(TOOLTIP_INSET, width - TOOLTIP_INSET), current.x),
+              )}px`,
+            }}
             aria-hidden="true"
           >
             <strong>
@@ -470,7 +494,9 @@ export function LineChart({
   }
 
   const padding = { top: 16, right: 14, bottom: 28, left: 38 };
-  const plotWidth = Math.max(120, width - padding.left - padding.right);
+  // Never a floor, for the same reason as the trend: the plot is only ever as wide as the
+  // space the card leaves between its own padding.
+  const plotWidth = Math.max(0, width - padding.left - padding.right);
   const plotHeight = height - padding.top - padding.bottom;
   // Scores run from zero, so the height of a point always means the same thing.
   const scale = (value: number) => height - padding.bottom - (Math.max(0, Math.min(100, value)) / 100) * plotHeight;
@@ -553,13 +579,19 @@ export function DonutChart({
   if (!total) return <p className="chart-empty">No data recorded yet.</p>;
 
   /*
-   * The ring keeps its proportions but follows the column it sits in: it shrinks on a
-   * narrow card and is capped on a wide one, so the legend always has room beside it.
+   * The ring is drawn at a pixel size, so it must never be asked to be wider than the space
+   * it was measured in — a fixed 140px floor used to overflow a narrow card. It takes just
+   * under half the width so the legend has room beside it, is capped by `size` on a wide
+   * card, and is allowed to fall to 96px before it would rather be small than spilling.
    */
   const segments = distinctTones(data);
-  const diameter = Math.max(140, Math.min(size, Math.round(width * 0.46)));
-  // A ring thick enough to read as a solid band, inset so it never touches the viewBox.
-  const thickness = Math.max(16, Math.round(diameter * 0.15));
+  const diameter = Math.max(
+    96,
+    Math.min(size, Math.round(width * 0.46), Math.max(96, Math.floor(width) - 16)),
+  );
+  // A ring thick enough to read as a solid band, inset so it never touches the viewBox,
+  // and never so thick that a small ring closes into a disc.
+  const thickness = Math.max(12, Math.min(Math.round(diameter * 0.15), Math.round(diameter * 0.22)));
   const radius = diameter / 2 - thickness / 2 - 1;
   const circumference = 2 * Math.PI * radius;
   let offset = 0;
