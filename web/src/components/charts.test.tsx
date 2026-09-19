@@ -1,7 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { BarChart, DonutChart, LineChart, TrendChart, axisTickIndexes, distinctTones, niceScale } from './charts';
+import {
+  BarChart,
+  BarList,
+  DonutChart,
+  LineChart,
+  StackedBarChart,
+  TrendChart,
+  axisTickIndexes,
+  distinctTones,
+  niceScale,
+} from './charts';
 
 /** Pretend the panel is a given number of CSS pixels wide, as a real layout would. */
 function withPanelWidth(width: number) {
@@ -503,5 +513,106 @@ describe('daily bars', () => {
     expect(heights[2]).toBeGreaterThan(140);
     expect(heights[3]).toBeGreaterThanOrEqual(3);
     expect(heights[3]).toBeLessThan(20);
+  });
+});
+
+describe('stacked columns', () => {
+  const series = [
+    { key: 'ok', label: 'Successful', tone: 'success' },
+    { key: 'bad', label: 'Failed', tone: 'danger' },
+  ];
+  const data = [
+    { label: '09-15', detail: '2026-09-15', values: [10, 2] },
+    { label: '09-16', detail: '2026-09-16', values: [0, 0] },
+    { label: '09-17', detail: '2026-09-17', values: [6, 0] },
+  ];
+
+  it('stacks each series and draws nothing for a day with no activity', () => {
+    render(<StackedBarChart ariaLabel="Sign-ins per day" series={series} data={data} unit="sign-ins" />);
+    const chart = screen.getByRole('img', { name: 'Sign-ins per day' });
+    const columns = Array.from(chart.querySelectorAll('.chart__column'));
+
+    // Day one holds both series, day two is empty, day three holds only successes.
+    expect(columns[0].querySelectorAll('.chart__stack-segment')).toHaveLength(2);
+    expect((columns[1].querySelector('.chart__stack') as HTMLElement).style.height).toBe('0px');
+    expect(columns[1].querySelectorAll('.chart__stack-segment')).toHaveLength(0);
+    expect(columns[2].querySelectorAll('.chart__stack-segment')).toHaveLength(1);
+  });
+
+  it('gives every segment exactly one tone modifier, matched by its legend swatch', () => {
+    render(<StackedBarChart ariaLabel="Sign-ins per day" series={series} data={data} />);
+    const segments = Array.from(document.querySelectorAll('.chart__stack-segment')) as HTMLElement[];
+    // One of the palette modifiers, and nothing else: this is what the theme audit reads.
+    for (const segment of segments) {
+      const modifiers = Array.from(segment.classList).filter((name) => name.startsWith('chart__stack-segment--'));
+      expect(modifiers).toHaveLength(1);
+      expect(['default', 'accent', 'success', 'warning', 'danger', 'neutral']).toContain(
+        modifiers[0].replace('chart__stack-segment--', ''),
+      );
+    }
+    // The stack keeps its order: successes first in the legend, and the same tones in the bars.
+    expect(segments[0].classList.contains('chart__stack-segment--success')).toBe(true);
+    expect(segments[1].classList.contains('chart__stack-segment--danger')).toBe(true);
+    // The legend reuses the shared swatch classes, so it is themed from the same tokens.
+    expect(document.querySelectorAll('.chart__swatch--success').length).toBeGreaterThan(0);
+    expect(document.querySelectorAll('.chart__swatch--danger').length).toBeGreaterThan(0);
+  });
+
+  it('states each series in words and in the accessible table', () => {
+    render(<StackedBarChart ariaLabel="Sign-ins per day" series={series} data={data} unit="sign-ins" />);
+    // The split is never carried by colour alone.
+    const legend = document.querySelector('.chart__key') as HTMLElement;
+    expect(within(legend).getByText('Successful')).toBeInTheDocument();
+    expect(within(legend).getByText('16 sign-ins')).toBeInTheDocument();
+    expect(within(legend).getByText('2 sign-ins')).toBeInTheDocument();
+    expect(screen.getByText(/16 successful · 2 failed in total\./)).toBeInTheDocument();
+
+    const table = document.querySelector('figcaption.sr-only table') as HTMLElement;
+    expect(within(table).getByText('2026-09-15')).toBeInTheDocument();
+    // One column per series plus a total.
+    const headers = within(table).getAllByRole('columnheader').map((cell) => cell.textContent);
+    expect(headers).toEqual(['Category', 'Successful', 'Failed', 'Total']);
+  });
+
+  it('says so plainly when the period recorded nothing', () => {
+    render(
+      <StackedBarChart
+        ariaLabel="Sign-ins per day"
+        series={series}
+        data={[{ label: '09-17', values: [0, 0] }]}
+      />,
+    );
+    expect(screen.getByText('No activity was recorded in this period.')).toBeInTheDocument();
+  });
+});
+
+describe('ranked bars', () => {
+  const items = [
+    { label: 'Northgate Institute of Technology', value: 53, meta: '30 candidates', detail: 'Northgate (NIT)' },
+    { label: 'Platform Office', value: 0, meta: '0 candidates', detail: 'Platform Office (PLATFORM)' },
+  ];
+
+  it('scales every bar against the largest value and leaves a zero empty', () => {
+    render(<BarList ariaLabel="Attempts by institution" unit="attempts" items={items} />);
+    const fills = Array.from(document.querySelectorAll('.rank__fill')) as HTMLElement[];
+    expect(fills[0].style.width).toBe('100%');
+    expect(fills[1].style.width).toBe('0%');
+  });
+
+  it('names each bar, its figure and its detail in the accessible table', () => {
+    render(<BarList ariaLabel="Attempts by institution" unit="attempts" items={items} />);
+    expect(screen.getByText('Northgate Institute of Technology')).toBeInTheDocument();
+    expect(screen.getByText('53 attempts')).toBeInTheDocument();
+    expect(screen.getByText('30 candidates')).toBeInTheDocument();
+
+    const table = document.querySelector('figcaption.sr-only table') as HTMLElement;
+    expect(within(table).getByText('Northgate (NIT)')).toBeInTheDocument();
+    expect(within(table).getAllByRole('row')).toHaveLength(3); // header + two institutions
+  });
+
+  it('explains an empty ranking rather than rendering an empty frame', () => {
+    render(<BarList ariaLabel="Attempts by institution" items={[]} emptyLabel="No institution has recorded any attempt yet." />);
+    expect(screen.getByText('No institution has recorded any attempt yet.')).toBeInTheDocument();
+    expect(document.querySelector('.rank')).toBeNull();
   });
 });

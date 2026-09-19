@@ -635,3 +635,230 @@ export function DonutChart({
     </figure>
   );
 }
+
+/* ------------------------------------------------------------- stacked columns */
+
+export interface StackedPoint {
+  label: string;
+  /** Fuller description used in the tooltip and the accessible table (for example an ISO date). */
+  detail?: string;
+  /** One figure per series, in the order the legend lists them. */
+  values: number[];
+}
+
+/**
+ * Several series stacked into one column per category.
+ *
+ * Used where the composition matters as much as the total — successful against failed
+ * sign-ins on a day. Every column is scaled against the busiest total, each series keeps
+ * its own token colour, and the legend states each series' figure in words so the split is
+ * never carried by colour alone. A series with nothing in it draws no segment at all.
+ */
+export function StackedBarChart({
+  data,
+  series,
+  height = 200,
+  ariaLabel,
+  unit,
+  showSummary = true,
+}: {
+  data: StackedPoint[];
+  series: { key: string; label: string; tone?: string }[];
+  height?: number;
+  ariaLabel: string;
+  unit?: string;
+  showSummary?: boolean;
+}) {
+  // Hooks run before the empty-state return so the hook order never changes mid-refetch.
+  const [container, width] = useMeasuredWidth<HTMLElement>(560);
+
+  if (!data.length || !series.length) {
+    return <p className="chart-empty">No data recorded for this period yet.</p>;
+  }
+
+  const totals = data.map((point) => point.values.reduce((sum, value) => sum + value, 0));
+  const peak = Math.max(...totals, 1);
+  const inlineTotals = width / data.length >= 30;
+  const capacity = Math.max(3, Math.min(7, Math.floor(width / 56)));
+  const ticks = new Set(axisTickIndexes(data.length, capacity));
+  const plot = width < 460 ? Math.min(height, 148) : height;
+  const plotHeight = plot - (inlineTotals ? 34 : 18);
+  const tones = series.map((item) => toneName(item.tone));
+  const seriesTotals = series.map((_, index) =>
+    data.reduce((sum, point) => sum + (point.values[index] ?? 0), 0),
+  );
+  const grandTotal = seriesTotals.reduce((sum, value) => sum + value, 0);
+
+  return (
+    <figure className="chart" ref={container}>
+      <div className="chart__bars" style={{ height: plot }} role="img" aria-label={ariaLabel}>
+        {data.map((point, index) => {
+          const total = totals[index];
+          return (
+            <div
+              key={point.label}
+              className="chart__column"
+              title={`${point.detail ?? point.label}: ${series
+                .map((item, seriesIndex) => `${point.values[seriesIndex] ?? 0} ${item.label.toLowerCase()}`)
+                .join(', ')}`}
+            >
+              <span className={`chart__value ${inlineTotals ? '' : 'chart__value--hidden'}`} aria-hidden={!inlineTotals}>
+                {total}
+              </span>
+              {/* A day with nothing in it draws no column: a visible minimum would read as
+                  a small amount of activity rather than none. */}
+              <span
+                className="chart__stack"
+                style={{ height: total === 0 ? 0 : `${Math.max(3, (total / peak) * plotHeight)}px` }}
+              >
+                {series.map((item, seriesIndex) => {
+                  const value = point.values[seriesIndex] ?? 0;
+                  if (value === 0) return null;
+                  return (
+                    <span
+                      key={item.key}
+                      className={`chart__stack-segment chart__stack-segment--${tones[seriesIndex]}`}
+                      style={{ flexGrow: value, flexBasis: 0 }}
+                    />
+                  );
+                })}
+              </span>
+              <span className={`chart__label ${ticks.has(index) ? '' : 'chart__label--hidden'}`} aria-hidden={!ticks.has(index)}>
+                {ticks.has(index) ? point.label : data[0].label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <ul className="chart__key">
+        {series.map((item, index) => (
+          <li key={item.key}>
+            <span className={`chart__swatch chart__swatch--${tones[index]}`} aria-hidden="true" />
+            <span className="chart__key-label">{item.label}</span>
+            <span className="chart__key-value">
+              {seriesTotals[index]}
+              {unit ? ` ${unit}` : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {showSummary ? (
+        <p className="chart__summary">
+          {grandTotal === 0
+            ? 'No activity was recorded in this period.'
+            : `${series.map((item, index) => `${seriesTotals[index]} ${item.label.toLowerCase()}`).join(' · ')} in total.`}
+        </p>
+      ) : null}
+      <figcaption className="sr-only">
+        <table>
+          <caption>{ariaLabel}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Category</th>
+              {series.map((item) => (
+                <th key={item.key} scope="col">
+                  {item.label}
+                </th>
+              ))}
+              <th scope="col">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((point, index) => (
+              <tr key={point.label}>
+                <td>{point.detail ?? point.label}</td>
+                {series.map((item, seriesIndex) => (
+                  <td key={item.key}>{point.values[seriesIndex] ?? 0}</td>
+                ))}
+                <td>{totals[index]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </figcaption>
+    </figure>
+  );
+}
+
+/* ---------------------------------------------------------------- ranked bars */
+
+export interface RankedItem {
+  label: string;
+  value: number;
+  /** Secondary line under the label, such as a cohort size. */
+  meta?: string;
+  detail?: string;
+}
+
+/**
+ * A ranking as horizontal bars.
+ *
+ * Reads far better than a column chart for named things with long labels — institutions,
+ * classes, subjects — because the label sits beside its own bar instead of on a rotated
+ * axis. Every bar is scaled against the largest value in the list.
+ */
+export function BarList({
+  items,
+  ariaLabel,
+  unit,
+  emptyLabel = 'Nothing recorded yet.',
+  tone = 'accent',
+}: {
+  items: RankedItem[];
+  ariaLabel: string;
+  unit?: string;
+  emptyLabel?: string;
+  tone?: string;
+}) {
+  if (!items.length) return <p className="chart-empty">{emptyLabel}</p>;
+  const peak = Math.max(...items.map((item) => item.value), 1);
+  const toneClass = toneName(tone);
+
+  return (
+    <figure className="chart chart--rank">
+      <ul className="rank">
+        {items.map((item) => {
+          const share = Math.round((item.value / peak) * 100);
+          return (
+            <li key={item.label} className="rank__row">
+              <span className="rank__head">
+                <span className="rank__label">{item.label}</span>
+                <span className="rank__value">
+                  {item.value}
+                  {unit ? ` ${unit}` : ''}
+                </span>
+              </span>
+              {item.meta ? <span className="rank__meta">{item.meta}</span> : null}
+              <span className="rank__track" aria-hidden="true">
+                {/* A zero draws no fill, so an empty institution is visibly empty. */}
+                <span
+                  className={`rank__fill rank__fill--${toneClass}`}
+                  style={{ width: item.value === 0 ? '0%' : `${Math.max(3, share)}%` }}
+                />
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <figcaption className="sr-only">
+        <table>
+          <caption>{ariaLabel}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Category</th>
+              <th scope="col">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.label}>
+                <td>{item.detail ?? item.label}</td>
+                <td>{item.value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </figcaption>
+    </figure>
+  );
+}

@@ -1,10 +1,11 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { formatDateTime, formatNumber, titleCase } from '../../lib/format';
-import { Badge, Card, DataTable, Loading, PageHeader, ProgressBar, StatCard } from '../../components/ui';
+import { Badge, Card, DataTable, Loading, PageHeader } from '../../components/ui';
 import { ErrorState } from '../../components/StatusPages';
-import { BarChart, TrendChart } from '../../components/charts';
+import { BarList, DonutChart, StackedBarChart, TrendChart } from '../../components/charts';
 import { AttentionPanel, StatDelta } from '../../components/dashboard';
 import type { PlatformDashboard } from '../../types';
 
@@ -15,12 +16,35 @@ const ACCOUNT_STATUS_LABELS: Record<string, string> = {
   disabled: 'Disabled',
 };
 
+/** A single figure in the dashboard's headline band. */
+function Metric({
+  label,
+  value,
+  meta,
+  tone,
+}: {
+  label: string;
+  value: ReactNode;
+  meta?: ReactNode;
+  tone?: 'accent' | 'warning' | 'success' | 'danger';
+}) {
+  return (
+    <div className={`metric-band__item ${tone ? `metric-band__item--${tone}` : ''}`}>
+      <span className="metric-band__label">{label}</span>
+      <span className="metric-band__value">{value}</span>
+      {meta ? <span className="metric-band__meta">{meta}</span> : null}
+    </div>
+  );
+}
+
 /**
  * Platform administration — the dashboard every platform administrator lands on.
  *
- * This is the operator's view of the service, not of any one institution's teaching: it
- * reports tenancy, accounts and platform activity, and every tenant figure is linked
- * through to that institution's own dashboard rather than duplicated here.
+ * This is the operator's view of the service, not of any one institution's teaching, so it
+ * is built around the three questions an operator actually asks: is the service healthy,
+ * who is using it, and what needs attention. Tenancy and account figures lead; assessment
+ * activity follows; each tenant links through to its own dashboard rather than a second
+ * dashboard being embedded here.
  */
 export default function PlatformDashboardPage() {
   const { data, isLoading, error, refetch } = useQuery({
@@ -33,10 +57,17 @@ export default function PlatformDashboardPage() {
   if (error || !data) return <ErrorState message="The platform dashboard could not be loaded." onRetry={() => void refetch()} />;
 
   const { counts } = data;
-  const failedLogins = data.loginActivity.reduce((sum, day) => sum + day.failed, 0);
-  const successfulLogins = data.loginActivity.reduce((sum, day) => sum + day.successful, 0);
-  // The busiest tenant sets the scale for the usage column, so the bar lengths compare.
-  const busiest = data.institutionBreakdown.reduce((max, row) => Math.max(max, row.attempts), 0);
+  // The sign-in totals are stated by the chart itself, in its legend and summary.
+  const pendingAccounts = data.accountMix.find((row) => row.status === 'pending')?.count ?? 0;
+
+  const ranked = [...data.institutionBreakdown]
+    .sort((a, b) => b.attempts - a.attempts)
+    .map((row) => ({
+      label: row.name,
+      value: row.attempts,
+      meta: `${formatNumber(row.students)} candidates · ${formatNumber(row.teachers)} examiners · ${row.exams} examinations`,
+      detail: `${row.name} (${row.code})`,
+    }));
 
   return (
     <div className="page">
@@ -44,8 +75,8 @@ export default function PlatformDashboardPage() {
         title="Platform administration"
         description={
           <>
-            Cross-institution operations for {counts.institutions} institution{counts.institutions === 1 ? '' : 's'} ·
-            server time {formatDateTime(data.serverTime)}
+            {counts.institutions} institution{counts.institutions === 1 ? '' : 's'} · {formatNumber(counts.users)} user
+            accounts · server time {formatDateTime(data.serverTime)}
           </>
         }
         actions={
@@ -62,45 +93,31 @@ export default function PlatformDashboardPage() {
 
       <AttentionPanel items={data.attention} title="Needs attention" />
 
-      {/* Tenancy and accounts first, then assessment activity. */}
-      <div className="stat-grid">
-        <StatCard
+      {/* The headline figures as one band, so the charts below stay in view. */}
+      <div className="metric-band">
+        <Metric
           label="Institutions"
           value={counts.institutions}
           tone="accent"
           meta={`${counts.active_institutions} active · ${counts.demo_institutions} demonstration`}
         />
-        <StatCard
+        <Metric
           label="User accounts"
           value={formatNumber(counts.users)}
           meta={`${counts.active_users} active · ${counts.active_sessions} sessions open`}
+          tone={pendingAccounts > 0 ? 'warning' : undefined}
         />
-        <StatCard label="Candidates" value={formatNumber(counts.students)} meta={`${counts.teachers} examiners`} />
-        <StatCard
-          label="Examinations"
-          value={counts.exams}
-          meta={`${counts.active_exams} active · ${counts.questions} questions banked`}
-        />
-        <StatCard
+        <Metric label="Candidates" value={formatNumber(counts.students)} meta={`${counts.teachers} examiners`} />
+        <Metric label="Examinations" value={counts.exams} meta={`${counts.active_exams} active`} />
+        <Metric
           label="Submissions"
           value={formatNumber(counts.attempts)}
           meta={<StatDelta delta={data.deltas.submissions} />}
         />
-        <StatCard
+        <Metric
           label="New accounts"
           value={formatNumber(data.deltas.signups.current)}
           meta={<StatDelta delta={data.deltas.signups} />}
-        />
-        <StatCard
-          label="Attempts in progress"
-          value={counts.live_attempts}
-          tone={counts.live_attempts > 0 ? 'accent' : 'neutral'}
-          meta="Timed attempts currently open"
-        />
-        <StatCard
-          label="Sign-ins"
-          value={formatNumber(successfulLogins)}
-          meta={`${failedLogins} failure${failedLogins === 1 ? '' : 's'} in the last 14 days`}
         />
       </div>
 
@@ -124,28 +141,55 @@ export default function PlatformDashboardPage() {
         <Card
           className="card--chart"
           title="Sign-in activity"
-          description="Successful sign-ins each day over the last 14 days."
+          description="Successful and failed sign-ins each day, over the last 14 days."
         >
-          <BarChart
-            ariaLabel="Successful sign-ins per day over the last fourteen days"
-            unit="successful sign-ins"
+          {/* Both series are stacked, so a day's failures are visible beside its successes
+              rather than hidden behind a single bar. */}
+          <StackedBarChart
+            ariaLabel="Successful and failed sign-ins per day over the last fourteen days"
+            unit="sign-ins"
+            series={[
+              { key: 'successful', label: 'Successful', tone: 'success' },
+              { key: 'failed', label: 'Failed', tone: 'danger' },
+            ]}
             data={data.loginActivity.map((day) => ({
               label: day.day.slice(5),
               detail: day.day,
-              value: day.successful,
+              values: [day.successful, day.failed],
             }))}
           />
-          <p className="text-sm text-muted">
-            {failedLogins === 0
-              ? 'No failed sign-ins in the last 14 days.'
-              : `${failedLogins} failed sign-in${failedLogins === 1 ? '' : 's'} in the last 14 days. Repeat failures trigger the lockout policy and are recorded in the audit log.`}
-          </p>
+        </Card>
+      </div>
+
+      <div className="split-2">
+        <Card
+          title="Where activity happens"
+          description="Attempts recorded by each institution, over the whole history."
+        >
+          {/* Institutions have long names, so they rank as horizontal bars. */}
+          <BarList
+            ariaLabel="Attempts recorded by each institution"
+            unit="attempts"
+            items={ranked}
+            emptyLabel="No institution has recorded any attempt yet."
+          />
+        </Card>
+        <Card title="Accounts by status" description="User accounts by status across the platform.">
+          <DonutChart
+            ariaLabel="User accounts by status"
+            data={data.accountMix.map((row) => ({
+              label: ACCOUNT_STATUS_LABELS[row.status] ?? titleCase(row.status),
+              value: row.count,
+              tone: row.status === 'active' ? 'success' : row.status === 'pending' ? 'warning' : 'danger',
+            }))}
+          />
         </Card>
       </div>
 
       {/*
-       * Every tenant, with its usage. This is the whole of the platform's institution
-       * reporting — the dashboard deliberately does not repeat it as a separate ranking.
+       * Every tenant with its usage. The platform office is listed last and marked as such:
+       * it owns no candidates or papers, so offering to open its dashboard would be a
+       * permanently empty page.
        */}
       <Card
         title="Institutions"
@@ -190,29 +234,14 @@ export default function PlatformDashboardPage() {
             { key: 'students', header: 'Candidates', align: 'right', render: (row) => formatNumber(row.students) },
             { key: 'teachers', header: 'Examiners', align: 'right', render: (row) => formatNumber(row.teachers) },
             { key: 'exams', header: 'Examinations', align: 'right', render: (row) => formatNumber(row.exams) },
-            {
-              key: 'attempts',
-              header: 'Attempts',
-              align: 'right',
-              render: (row) => (
-                <div className="progress-cell">
-                  <ProgressBar value={busiest ? (row.attempts / busiest) * 100 : 0} />
-                  <span>{formatNumber(row.attempts)}</span>
-                </div>
-              ),
-            },
+            { key: 'attempts', header: 'Attempts', align: 'right', render: (row) => formatNumber(row.attempts) },
             {
               key: 'inspect',
               header: '',
               align: 'right',
               render: (row) =>
-                /*
-                 * The platform office is the operator's own record, not a teaching tenant:
-                 * its dashboard holds no candidates, papers or results by design, so it is
-                 * marked as not applicable rather than linked to an empty page.
-                 */
                 row.code === 'PLATFORM' ? (
-                  <span className="text-sm text-muted">Not a tenant</span>
+                  <span className="text-sm text-muted">Not a teaching institution</span>
                 ) : (
                   <Link
                     className="btn btn--sm"
@@ -226,33 +255,6 @@ export default function PlatformDashboardPage() {
           ]}
         />
       </Card>
-
-      <div className="split-2">
-        <Card title="Institution status" description="Every institution by its recorded status." flush>
-          <ul className="check-list">
-            {data.institutionStatus.map((row) => (
-              <li key={row.status} className="check-list__item">
-                <span>{titleCase(row.status)}</span>
-                <Badge tone={row.status === 'active' ? 'success' : row.status === 'suspended' ? 'warning' : 'outline'}>
-                  {row.count}
-                </Badge>
-              </li>
-            ))}
-          </ul>
-        </Card>
-        <Card title="Account status" description="User accounts by status across the platform." flush>
-          <ul className="check-list">
-            {data.accountMix.map((row) => (
-              <li key={row.status} className="check-list__item">
-                <span>{ACCOUNT_STATUS_LABELS[row.status] ?? titleCase(row.status)}</span>
-                <Badge tone={row.status === 'active' ? 'success' : row.status === 'pending' ? 'warning' : 'outline'}>
-                  {row.count}
-                </Badge>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      </div>
 
       <Card
         title="Latest platform activity"

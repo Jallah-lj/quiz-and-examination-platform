@@ -310,6 +310,19 @@ function platformPayload(): PlatformDashboard {
         exams: 3,
         attempts: 53,
       },
+      // The platform office is the operator's own record: it runs no teaching. The seeded
+      // platform always has one, so the "empty institution stays empty" case is real.
+      {
+        id: 1,
+        name: 'Platform Office',
+        code: 'PLATFORM',
+        status: 'active',
+        is_demo: 0,
+        students: 0,
+        teachers: 0,
+        exams: 0,
+        attempts: 0,
+      },
     ],
     recentAudit: [],
   };
@@ -590,7 +603,7 @@ describe('platform dashboard', () => {
     vi.unstubAllGlobals();
   });
 
-  it('reports platform exceptions, institution status and where activity happens', async () => {
+  it('reports platform exceptions, account mix and where activity happens', async () => {
     installFetch(platformPayload());
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
@@ -604,13 +617,40 @@ describe('platform dashboard', () => {
     );
 
     expect(await screen.findByText('1 account(s) awaiting approval')).toBeInTheDocument();
-    expect(screen.getByText('Account status')).toBeInTheDocument();
-    expect(screen.getByText('Pending activation')).toBeInTheDocument();
-    expect(screen.getByText('Institution status')).toBeInTheDocument();
+
+    // The headline band carries the platform's scale, in one band rather than eight tiles.
+    const band = document.querySelector('.metric-band') as HTMLElement;
+    const metric = (label: string) =>
+      Array.from(band.querySelectorAll('.metric-band__item')).find(
+        (item) => item.querySelector('.metric-band__label')?.textContent === label,
+      ) as HTMLElement;
+    expect(metric('Institutions').querySelector('.metric-band__value')?.textContent).toBe('1');
+    // Every account on this platform was created inside the sign-up window, so the total
+    // and the new-account figure agree; both are shown rather than one being hidden.
+    expect(metric('User accounts').querySelector('.metric-band__value')?.textContent).toBe('39');
+    expect(metric('New accounts').querySelector('.metric-band__value')?.textContent).toBe('39');
+    expect(metric('Submissions').querySelector('.metric-band__value')?.textContent).toBe('53');
+
     // Movement without a comparable earlier period is stated rather than invented.
     expect(screen.getAllByText(/no comparable earlier period/)).toHaveLength(2);
-    // Institution usage is ranked with a real attempt count.
+
+    // Account mix is a distribution with named bands, not a bare list of numbers.
+    expect(screen.getByText('Accounts by status')).toBeInTheDocument();
+    expect(screen.getByText('Pending activation')).toBeInTheDocument();
+
+    // Sign-ins show both series, so a failed sign-in is visible beside the successful ones.
+    const signIns = document.querySelector('.chart__key') as HTMLElement;
+    expect(within(signIns).getByText('Successful')).toBeInTheDocument();
+    expect(within(signIns).getByText('Failed')).toBeInTheDocument();
+    expect(screen.getByText(/17 successful · 2 failed in total\./)).toBeInTheDocument();
+
+    // Institution usage is ranked with a real attempt count, and the empty one stays empty.
     expect(screen.getAllByText('Northgate Institute of Technology').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('53').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('53 attempts').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('0 attempts').length).toBeGreaterThan(0);
+    // The platform office owns no candidates or papers, so it is named as such rather than
+    // offering a dashboard that would be permanently empty.
+    expect(screen.getByText('Not a teaching institution')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /Open the dashboard for/ })).toHaveLength(1);
   });
 });

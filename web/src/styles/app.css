@@ -2504,6 +2504,109 @@ table.data-table {
 .chart__legend-fill--warning { background: var(--chart-4); }
 .chart__legend-fill--danger { background: var(--chart-5); }
 .chart__legend-fill--neutral { background: var(--chart-6); }
+/*
+ * Stacked columns. Each series is painted from the same token palette as every other
+ * chart, and the segments share one rounded column so the total reads as a single bar.
+ */
+.chart__stack {
+  display: flex;
+  flex-direction: column-reverse;
+  width: 100%;
+  max-width: 46px;
+  min-width: 3px;
+  border-radius: 2px 2px 0 0;
+  overflow: hidden;
+}
+.chart__stack-segment { display: block; min-height: 2px; }
+.chart__column:hover .chart__stack-segment { filter: brightness(0.9); }
+.chart__stack-segment--default { background: var(--chart-1); }
+.chart__stack-segment--accent { background: var(--chart-2); }
+.chart__stack-segment--success { background: var(--chart-3); }
+.chart__stack-segment--warning { background: var(--chart-4); }
+.chart__stack-segment--danger { background: var(--chart-5); }
+.chart__stack-segment--neutral { background: var(--chart-6); }
+
+/* Legend used by charts whose series are named rather than listed beside a slice. */
+.chart__key {
+  list-style: none;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.4rem;
+}
+.chart__key li { display: flex; align-items: center; gap: 0.45rem; font-size: 0.82rem; min-width: 0; }
+.chart__key-label { color: var(--ink-600); font-weight: 600; }
+.chart__key-value { color: var(--ink-900); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/*
+ * Horizontal rankings. A named thing with a long label is unreadable on a rotated
+ * column axis, so the label sits above its own bar and the figure sits at the end of
+ * the label line where the eye already is.
+ */
+.chart--rank .rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.85rem; }
+.rank__row { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+.rank__head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; min-width: 0; }
+.rank__label { font-size: 0.86rem; font-weight: 600; color: var(--ink-900); overflow-wrap: anywhere; }
+.rank__value { font-size: 0.86rem; font-weight: 600; color: var(--ink-700); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rank__meta { font-size: 0.76rem; color: var(--ink-500); }
+.rank__track { display: block; height: 8px; border-radius: 999px; background: var(--ink-100); overflow: hidden; }
+.rank__fill { display: block; height: 100%; border-radius: 999px; }
+.rank__fill--default { background: var(--chart-1); }
+.rank__fill--accent { background: var(--chart-2); }
+.rank__fill--success { background: var(--chart-3); }
+.rank__fill--warning { background: var(--chart-4); }
+.rank__fill--danger { background: var(--chart-5); }
+.rank__fill--neutral { background: var(--chart-6); }
+
+/*
+ * The metric band: the headline figures of a dashboard in one card, separated by hairlines
+ * rather than spread across eight floating tiles. It reads as a single band of numbers and
+ * keeps the charts below it in view.
+ */
+.metric-band {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  /* The 1px grid gap shows the border colour through, which draws the hairline dividers
+     between the figures whatever the band wraps to. */
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 1.1rem;
+  overflow: hidden;
+}
+.metric-band__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.95rem 1.1rem;
+  background: var(--surface);
+  min-width: 0;
+}
+.metric-band__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 600;
+  color: var(--ink-500);
+}
+.metric-band__value {
+  font-size: 1.55rem;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+.metric-band__meta { font-size: 0.78rem; color: var(--ink-500); }
+/* Tone marks the figure that needs attention, without changing the band's rhythm. */
+.metric-band__item--accent { box-shadow: inset 0 3px 0 var(--navy-600); }
+.metric-band__item--warning { box-shadow: inset 0 3px 0 var(--amber-600); }
+.metric-band__item--success { box-shadow: inset 0 3px 0 var(--green-600); }
+.metric-band__item--danger { box-shadow: inset 0 3px 0 var(--red-600); }
+
+
 /* Pointing at a row lights its slice and lets the rest recede, so the two agree. */
 .chart__segment { transition: opacity 120ms ease; }
 .chart__segment.is-dimmed { opacity: 0.3; }
