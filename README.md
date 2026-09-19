@@ -54,6 +54,8 @@ Secrets and environment-specific settings come from the environment; the default
 | `LOGIN_MAX_ATTEMPTS`, `LOGIN_LOCK_MINUTES` | Sign-in lockout policy |
 | `ATTEMPT_CLOCK_GRACE_SECONDS` | Grace window applied to server-side submission timing |
 | `CORS_ORIGINS` | Extra origins allowed to call the API (comma separated) |
+| `APP_BASE_URL` | Public address used to build links inside account emails |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Outbound mail for password reset and address verification (see below) |
 | `SERVE_WEB` | Serve `web/dist` from the API process (default on) |
 | `ALLOW_SESSION_TOKENS` | Allow the bearer session transport (see below) |
 | `SEED_DEMO_DATA`, `SCHEDULER_ENABLED` | Demo seed on boot, background scheduler |
@@ -74,6 +76,20 @@ configuration:
 
 `COOKIE_SECURE` / `COOKIE_SAME_SITE` override the automatic choice when a deployment
 needs a fixed policy.
+
+## Account email
+
+Password reset and address verification are only completable by the account owner, so the
+link is emailed rather than returned to the caller:
+
+- **Production**: set `SMTP_HOST` (plus `SMTP_FROM`, and `SMTP_USER`/`SMTP_PASS` if the relay
+  authenticates). Without it the server fails the send loudly and records the failure in the
+  audit log — it never pretends the message went out.
+- **Development**: with no mail server configured, messages are written to
+  `data/outbox/*.eml`, and the log line names the file. That is where a reset link can be
+  read during local work. `GET /api/system/info` reports the active transport.
+- Tokens are never written to logs, and the neutral response to `POST /api/auth/forgot-password`
+  is identical whether or not the address exists.
 
 ## Secrets and persistent sessions
 

@@ -14,9 +14,10 @@ import {
   requestPasswordReset,
   resolveSession,
   selfRegister,
+  sendVerificationEmail,
   verifyEmailToken,
+  createEmailVerification,
 } from '../services/auth';
-import { createEmailVerification } from '../services/auth';
 import { recordAudit } from '../services/audit';
 import type { AuthedRequest } from '../types';
 import { forbidden, notFound } from '../lib/errors';
@@ -198,7 +199,7 @@ router.post(
     // In non-production environments the reset link is returned so that a developer
     // can complete the flow without an SMTP server. Production never exposes it.
     return ok(res, {
-      message: 'If an account exists for that address, a password reset link has been generated.',
+      message: 'If an account exists for that address, a password reset link has been emailed to it.',
       ...(env.exposeResetTokens && result.token ? { resetToken: result.token } : {}),
     });
   }),
@@ -284,8 +285,19 @@ router.post(
       category: 'auth',
       description: 'Email verification re-issued',
     });
+    const delivery = await sendVerificationEmail(db, {
+      userId: user.id,
+      email: user.email,
+      fullName: req.user!.fullName,
+      institutionId: req.user!.institutionId,
+      token,
+      ip: req.ip ?? null,
+      userAgent: req.header('user-agent') ?? null,
+    });
     return ok(res, {
-      message: 'A new verification link has been generated.',
+      message: delivery.delivered
+        ? 'A new verification link has been sent to your email address.'
+        : 'A new verification link was generated, but the email could not be sent. Contact your administrator.',
       ...(env.exposeResetTokens ? { verificationToken: token } : {}),
     });
   }),

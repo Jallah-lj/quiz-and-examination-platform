@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { getDb } from '../db';
+import { mailStatus } from '../lib/mailer';
 import { asyncHandler, created, ok, okList } from '../lib/http';
 import { conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { listQuery, parseWith } from '../lib/validation';
@@ -512,6 +513,8 @@ systemRouter.get(
       schemaVersion: version ?? 'initial',
       serverTime: nowIso(),
       demoDataEnabled: env.seedDemoData,
+      // Whether account emails (password reset, verification) can actually be delivered.
+      email: mailStatus(),
       counts,
       limits: {
         loginMaxAttempts: env.loginMaxAttempts,

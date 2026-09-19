@@ -10,6 +10,7 @@ import { buildHarness, type Fixture, type Harness } from '../test-utils/harness'
 import { createRateLimiter } from '../middleware/security';
 import { errorHandler } from '../middleware/errors';
 import { addMinutes, nowIso } from '../lib/time';
+import { setMailTransport, type MailMessage } from '../lib/mailer';
 
 let harness: Harness;
 let db: Db;
@@ -22,6 +23,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setMailTransport(null);
   db.close();
 });
 
@@ -259,6 +261,59 @@ describe('session and token handling', () => {
       .post('/api/auth/reset-password')
       .send({ token, password: 'Whatever-Pass1' });
     expect(response.status).toBe(422);
+  });
+
+  it('emails the reset link to the account owner instead of only minting a token', async () => {
+    const sent: (MailMessage & { from: string })[] = [];
+    setMailTransport({
+      name: 'capture',
+      async send(message) {
+        sent.push(message);
+      },
+    });
+
+    const response = await harness.agent().post('/api/auth/forgot-password').send({ email: 'student@alpha.test' });
+    expect(response.status).toBe(200);
+
+    // Exactly one message, to the address that asked, carrying a usable link.
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe('student@alpha.test');
+    const link = sent[0].text.match(/\/reset-password\?token=([A-Za-z0-9_-]+)/);
+    expect(link).toBeTruthy();
+
+    // The link that was emailed is the one that actually resets the password.
+    const reset = await harness
+      .agent()
+      .post('/api/auth/reset-password')
+      .send({ token: link![1], password: 'Brand-New-Pass1' });
+    expect(reset.status).toBe(200);
+    expect((await harness.login('student@alpha.test', 'Brand-New-Pass1')).status ?? 200).toBeDefined();
+
+    // Delivery is recorded, so administrators can see account email actually went out.
+    const audit = db
+      .prepare("SELECT description FROM audit_logs WHERE action = 'auth.password_reset_email'")
+      .get() as { description: string } | undefined;
+    expect(audit?.description).toMatch(/emailed to the account owner/i);
+  });
+
+  it('records a failed reset email without stalling the request or leaking the token', async () => {
+    setMailTransport({
+      name: 'broken',
+      async send() {
+        throw new Error('no route to host');
+      },
+    });
+
+    const response = await harness.agent().post('/api/auth/forgot-password').send({ email: 'student@alpha.test' });
+    // The caller still gets the neutral response — a delivery fault must not disclose
+    // whether the account exists.
+    expect(response.status).toBe(200);
+
+    const audit = db
+      .prepare("SELECT description FROM audit_logs WHERE action = 'auth.password_reset_email'")
+      .get() as { description: string } | undefined;
+    expect(audit?.description).toMatch(/could not be delivered/i);
+    expect(audit?.description).not.toContain('token');
   });
 
   it('prevents an administrator from deactivating their own account', async () => {

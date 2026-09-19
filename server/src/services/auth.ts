@@ -13,6 +13,7 @@ import { AppError, conflict, forbidden, notFound, unauthenticated, validationErr
 import { addHours, addMinutes, isPast, nowIso } from '../lib/time';
 import { PERMISSIONS, ROLE_PERMISSIONS } from '../lib/rbac';
 import type { AuthUser, RoleCode } from '../types';
+import { sendAccountEmail } from '../lib/mailer';
 import { recordAudit } from './audit';
 import { createNotification } from './notifications';
 
@@ -469,16 +470,42 @@ export async function requestPasswordReset(
     userAgent: meta.userAgent,
   });
 
-  const user = db.prepare('SELECT id, full_name, email, institution_id FROM users WHERE id = ?').get(row.id) as any;
+  const user = db.prepare('SELECT id, full_name, email, institution_id FROM users WHERE id = ?').get(row.id) as {
+    id: number;
+    full_name: string;
+    email: string;
+    institution_id: number | null;
+  };
   createNotification(db, {
     institutionId: row.institution_id,
     userId: row.id,
     type: 'password_reset_requested',
     title: 'Password reset requested',
-    body: 'A password reset link was generated for your account. If this was not you, contact your administrator.',
+    body: 'A password reset link was sent to your email address. If this was not you, contact your administrator.',
     severity: 'warning',
   });
-  void user;
+
+  // The link is delivered to the account owner. Delivery failure is recorded so an
+  // administrator can see that a reset was requested but never arrived.
+  const delivery = await sendAccountEmail({
+    to: user.email,
+    fullName: user.full_name,
+    template: 'password-reset',
+    token,
+  });
+  recordAudit(db, {
+    institutionId: row.institution_id,
+    userId: row.id,
+    actorName: row.full_name,
+    action: 'auth.password_reset_email',
+    category: 'auth',
+    description: delivery.delivered
+      ? 'Password reset link emailed to the account owner'
+      : `Password reset email could not be delivered: ${delivery.error}`,
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+  });
+
   return { token, userId: row.id };
 }
 
@@ -542,6 +569,43 @@ export function createEmailVerification(db: Db, userId: number, email: string): 
     'INSERT INTO email_verifications (user_id, token_hash, email, expires_at, created_at) VALUES (?,?,?,?,?)',
   ).run(userId, hashToken(token), email, addHours(nowIso(), 48), nowIso());
   return token;
+}
+
+/**
+ * Emails a verification link and audits the outcome. Used at registration and whenever a
+ * candidate asks for the link again — the token only ever reaches the account owner.
+ */
+export async function sendVerificationEmail(
+  db: Db,
+  input: {
+    userId: number;
+    email: string;
+    fullName: string;
+    institutionId: number | null;
+    token: string;
+    ip?: string | null;
+    userAgent?: string | null;
+  },
+): Promise<{ delivered: boolean }> {
+  const delivery = await sendAccountEmail({
+    to: input.email,
+    fullName: input.fullName,
+    template: 'email-verification',
+    token: input.token,
+  });
+  recordAudit(db, {
+    institutionId: input.institutionId,
+    userId: input.userId,
+    actorName: input.fullName,
+    action: 'auth.verification_email',
+    category: 'auth',
+    description: delivery.delivered
+      ? 'Verification link emailed to the account owner'
+      : `Verification email could not be delivered: ${delivery.error}`,
+    ip: input.ip,
+    userAgent: input.userAgent,
+  });
+  return { delivered: delivery.delivered };
 }
 
 export function verifyEmailToken(db: Db, token: string): { userId: number } {
@@ -613,6 +677,15 @@ export async function selfRegister(
     action: 'auth.self_registered',
     category: 'auth',
     description: 'Candidate self-registered and awaits approval',
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+  });
+  await sendVerificationEmail(db, {
+    userId: created,
+    email: input.email,
+    fullName: input.fullName,
+    institutionId: institution.id,
+    token: verificationToken,
     ip: meta.ip,
     userAgent: meta.userAgent,
   });

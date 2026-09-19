@@ -3,6 +3,7 @@ import path from 'node:path';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { assertValidConfig, env } from './config/env';
+import { mailStatus } from './lib/mailer';
 import { getDb } from './db';
 import apiRouter from './routes';
 import { authenticate } from './middleware/auth';
@@ -135,6 +136,12 @@ async function start(): Promise<void> {
       `explicit override COOKIE_SECURE=${process.env.COOKIE_SECURE ?? 'unset'} COOKIE_SAME_SITE=${process.env.COOKIE_SAME_SITE ?? 'unset'}), ` +
       `bearer fallback ${env.allowSessionTokens ? 'enabled' : 'disabled'}, ` +
       `tokens signed with ${process.env.SESSION_SECRET ? 'SESSION_SECRET from the environment' : 'a development secret stored beside the database'}`,
+  );
+  // Account emails (password reset, address verification) must never fail silently.
+  const mail = mailStatus();
+  // eslint-disable-next-line no-console
+  console.log(
+    `[examsys] email: ${mail.transport}${mail.deliveryConfigured ? '' : ' (development outbox — set SMTP_HOST for real delivery)'}, from ${mail.from}`,
   );
 
   if (env.schedulerEnabled) {

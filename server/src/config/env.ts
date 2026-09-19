@@ -76,6 +76,23 @@ export const env = {
   serveWeb: process.env.SERVE_WEB !== 'false',
   trustProxy: process.env.TRUST_PROXY === 'true',
   appName: process.env.APP_NAME ?? 'ExamSys',
+  /** Public address of this deployment, used to build links inside account emails. */
+  appBaseUrl: process.env.APP_BASE_URL ?? '',
+  /** The SPA's development port, used as the last-resort link base when nothing is set. */
+  webDevPort: Number(process.env.WEB_DEV_PORT ?? 5173),
+  /*
+   * Outbound email. `SMTP_HOST` is what switches real delivery on; without it the server
+   * writes messages to a development outbox and refuses to pretend it sent them in
+   * production. Credentials come from the environment only.
+   */
+  smtp: {
+    host: process.env.SMTP_HOST ?? '',
+    port: Number(process.env.SMTP_PORT ?? 587),
+    secure: process.env.SMTP_SECURE === 'true',
+    user: process.env.SMTP_USER ?? '',
+    pass: process.env.SMTP_PASS ?? '',
+    from: process.env.SMTP_FROM ?? process.env.SMTP_USER ?? 'no-reply@examsys.local',
+  },
   // Demo records are a development convenience: never enabled implicitly in production.
   seedDemoData: process.env.SEED_DEMO_DATA ? process.env.SEED_DEMO_DATA === 'true' : !isProd,
   schedulerEnabled: process.env.SCHEDULER_ENABLED !== 'false',

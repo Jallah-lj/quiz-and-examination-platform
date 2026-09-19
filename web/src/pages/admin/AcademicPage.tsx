@@ -952,6 +952,9 @@ function GroupModal({
   const [form, setForm] = useState({ name: '', classId: '', description: '', studentIds: [] as number[] });
   const [error, setError] = useState('');
   const [seededFor, setSeededFor] = useState<string | null>(null);
+  // Membership arrives from its own query, so it is seeded once per opening, tracked
+  // separately from the form reset above.
+  const [membersSeededFor, setMembersSeededFor] = useState<number | null>(null);
 
   const students = useQuery({
     queryKey: ['students', 'options', form.classId],
@@ -969,6 +972,9 @@ function GroupModal({
   if (key !== seededFor) {
     setSeededFor(key);
     setError('');
+    // Reopening a group must reload its saved membership, so the marker is cleared with
+    // the rest of the form rather than left over from the previous opening.
+    setMembersSeededFor(null);
     setForm({
       name: group?.name ?? '',
       classId: group?.class_id ? String(group.class_id) : '',
@@ -977,7 +983,10 @@ function GroupModal({
     });
   }
 
-  if (members.data && group && form.studentIds.length === 0) {
+  // Seeded once per opening. An empty selection is not used as the "not loaded yet" signal,
+  // because clearing every member is a legitimate edit that must survive.
+  if (members.data && group && membersSeededFor !== group.id) {
+    setMembersSeededFor(group.id);
     setForm((current) => ({ ...current, studentIds: members.data!.members.map((member) => member.student_id) }));
   }
 
