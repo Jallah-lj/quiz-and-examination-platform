@@ -1,0 +1,30 @@
+{
+  "name": "examsys",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ExamSys — Quiz & Examination Management Platform (multi-institution, RBAC, server-authoritative examinations)",
+  "license": "MIT",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm --workspace server run dev",
+    "dev:web": "npm --workspace web run dev",
+    "build": "npm --workspace web run build && npm --workspace server run build",
+    "start": "npm --workspace server run start",
+    "seed": "npm --workspace server run seed",
+    "reset": "npm --workspace server run reset",
+    "test": "npm --workspace server run test && npm --workspace web run test",
+    "test:server": "npm --workspace server run test",
+    "test:web": "npm --workspace web run test",
+    "typecheck": "npm --workspace server run typecheck && npm --workspace web run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
