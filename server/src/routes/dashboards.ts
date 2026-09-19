@@ -1016,6 +1016,13 @@ router.get(
           changePercent: changePercent(resultsRecent, resultsPrevious),
         },
       },
+      /*
+       * Which institution this dashboard describes. Platform staff can open any tenant's
+       * dashboard, so the page cannot infer the name from the viewer's own account.
+       */
+      institution: db
+        .prepare('SELECT id, name, code, type, is_demo FROM institutions WHERE id = ?')
+        .get(scope) ?? null,
       recentActivity,
       performanceBySubject,
       gradeDistribution,

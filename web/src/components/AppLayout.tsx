@@ -52,7 +52,6 @@ const NAVIGATION: NavSection[] = [
     label: 'Overview',
     items: [
       { to: '/dashboard', label: 'Dashboard', icon: IconDashboard, exact: true },
-      { to: '/platform', label: 'Platform overview', icon: IconShield, roles: ['super_admin'] },
       { to: '/institutions', label: 'Institutions', icon: IconBuilding, permissions: ['institution.view_all'] },
     ],
   },

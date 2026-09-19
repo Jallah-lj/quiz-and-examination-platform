@@ -17,6 +17,7 @@ export const APP_ROUTES = [
   '/notifications',
   '/platform',
   '/institutions',
+  '/institutions/:institutionId/dashboard',
   '/students',
   '/teachers',
   '/users',

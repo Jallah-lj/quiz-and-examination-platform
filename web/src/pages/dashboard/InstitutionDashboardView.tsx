@@ -66,16 +66,22 @@ export function InstitutionDashboardView({
         ? 'Nothing needs marking by hand'
         : 'Nothing is waiting to be marked';
 
+  /*
+   * The payload names the institution it describes. Platform staff viewing a tenant would
+   * otherwise see their own "Platform Office" record in the heading.
+   */
+  const title = data.institution?.name ?? heading ?? user?.institution?.name ?? 'Institution dashboard';
+
   return (
     <div className="page">
       <PageHeader
-        title={heading ?? user?.institution?.name ?? 'Institution dashboard'}
+        title={title}
         description={`Institution overview · server time ${formatDateTime(data.serverTime)}`}
         actions={
           <>
             {onBack ? (
               <Button size="sm" onClick={onBack}>
-                Back to platform overview
+                Back to institutions
               </Button>
             ) : null}
             <Link className="btn" to="/reports">

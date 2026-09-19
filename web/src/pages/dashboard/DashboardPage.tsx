@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
@@ -9,6 +9,7 @@ import { ErrorState } from '../../components/StatusPages';
 import { BarChart, DonutChart, LineChart } from '../../components/charts';
 import { AttentionPanel, DeadlineBanner } from '../../components/dashboard';
 import { InstitutionDashboardView } from './InstitutionDashboardView';
+import PlatformDashboardPage from './PlatformDashboardPage';
 import { StartAttemptDialog, type StartAttemptTarget } from '../../components/StartAttemptDialog';
 import type {
   StudentDashboard as StudentDashboardData,
@@ -18,7 +19,8 @@ import type {
 export default function DashboardPage() {
   const { user } = useAuth();
   if (!user) return <Loading />;
-  if (user.role === 'super_admin') return <Navigate to="/platform" replace />;
+  // Platform staff have no institution of their own, so their dashboard is the platform one.
+  if (user.role === 'super_admin') return <PlatformDashboardPage />;
   if (user.role === 'student') return <StudentDashboard />;
   if (user.role === 'teacher') return <TeacherDashboard />;
   return <InstitutionDashboardView heading={user.institution?.name} />;

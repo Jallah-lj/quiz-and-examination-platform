@@ -893,6 +893,8 @@ export interface StudentDashboard {
 
 export interface AdminDashboard {
   serverTime: string;
+  /** The institution this dashboard describes — not necessarily the viewer's own. */
+  institution: { id: number; name: string; code: string; type: string; is_demo: number } | null;
   counts: Record<string, number>;
   passRate: { graded: number; passed: number; failed: number; average_percentage: number; passRate: number };
   recentActivity: AuditLogRow[];

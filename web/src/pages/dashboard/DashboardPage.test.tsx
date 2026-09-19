@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import DashboardPage from './DashboardPage';
 import PlatformDashboardPage from './PlatformDashboardPage';
+import InstitutionDashboardPage from './InstitutionDashboardPage';
 import type { AdminDashboard, PlatformDashboard, StudentDashboard, TeacherDashboard } from '../../types';
 
 const user = {
@@ -82,6 +82,7 @@ function studentPayload(): StudentDashboard {
 function adminPayload(): AdminDashboard {
   return {
     serverTime: '2026-09-17T09:00:00.000Z',
+    institution: { id: 2, name: 'Northgate Institute of Technology', code: 'NIT', type: 'university', is_demo: 1 },
     counts: {
       students: 30,
       teachers: 5,
@@ -332,7 +333,7 @@ function installFetch(payload: unknown) {
   return fetchMock;
 }
 
-function renderDashboard(role: 'institution_admin' | 'student') {
+function renderDashboard(role: 'institution_admin' | 'student' | 'super_admin') {
   user.role = role as typeof user.role;
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
@@ -345,6 +346,32 @@ function renderDashboard(role: 'institution_admin' | 'student') {
     </QueryClientProvider>,
   );
 }
+
+describe('platform administrator landing', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('serves the platform dashboard at /dashboard rather than redirecting elsewhere', async () => {
+    // Platform administrators have no institution of their own. Their dashboard used to
+    // live at a second address that the sidebar also linked to, so "Dashboard" and
+    // "Platform overview" were two names for one page.
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return new Response(JSON.stringify({ data: platformPayload() }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderDashboard('super_admin');
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Platform administration' })).toBeInTheDocument();
+    expect(calls.some((url) => url.includes('/api/dashboard/platform'))).toBe(true);
+  });
+});
 
 describe('candidate dashboard', () => {
   beforeEach(() => {
@@ -478,9 +505,10 @@ describe('examiner dashboard', () => {
   });
 });
 
-  it('drills into one institution on request instead of showing a page of zeros', async () => {
-    // The unscoped institution endpoint answers 422 for platform staff; if this page ever
-    // requests it while nothing is selected, the drill-through is broken.
+  it('links to a tenant dashboard instead of embedding a second dashboard in the page', async () => {
+    // A platform administrator holds no institution of their own, so the unscoped
+    // institution endpoint answers 422. Requesting it here would mean the page was
+    // rendering tenant figures without knowing which tenant.
     const calls: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -491,24 +519,8 @@ describe('examiner dashboard', () => {
           headers: { 'content-type': 'application/json' },
         });
       }
-      if (url.includes('/api/dashboard/admin')) {
-        return url.includes('institutionId=2')
-          ? new Response(JSON.stringify({ data: adminPayload() }), {
-              status: 200,
-              headers: { 'content-type': 'application/json' },
-            })
-          : new Response(
-              JSON.stringify({
-                error: {
-                  code: 'UNPROCESSABLE',
-                  message: 'Select an institution to view its dashboard.',
-                },
-              }),
-              { status: 422, headers: { 'content-type': 'application/json' } },
-            );
-      }
-      return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: url } }), {
-        status: 404,
+      return new Response(JSON.stringify({ data: adminPayload() }), {
+        status: 200,
         headers: { 'content-type': 'application/json' },
       });
     });
@@ -517,7 +529,6 @@ describe('examiner dashboard', () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
     });
-    const user = userEvent.setup();
     render(
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={['/platform']}>
@@ -526,24 +537,53 @@ describe('examiner dashboard', () => {
       </QueryClientProvider>,
     );
 
-    const picker = await screen.findByLabelText('Institution');
-    expect(screen.getByText(/Nothing is shown until an institution is selected/i)).toBeInTheDocument();
-    // Nothing institution-scoped is fetched until a tenant is chosen.
+    // The tenant appears with its usage, and the way into it is a real link.
+    const link = await screen.findByRole('link', { name: 'Open the dashboard for Northgate Institute of Technology' });
+    expect(link).toHaveAttribute('href', '/institutions/2/dashboard');
+
+    // No institution dashboard is fetched or rendered inside the platform dashboard.
+    await waitFor(() => expect(calls.some((url) => url.includes('/api/dashboard/platform'))).toBe(true));
     expect(calls.some((url) => url.includes('/api/dashboard/admin'))).toBe(false);
-
-    await user.selectOptions(picker, '2');
-
-    // Real figures from the selected tenant, aggregated server-side.
-    expect(await screen.findByText('Papers without questions')).toBeInTheDocument();
-    expect(screen.getByText('1 paper(s) without questions')).toBeInTheDocument();
-    expect(screen.getByText(/Up 50% versus the previous last 14 days/)).toBeInTheDocument();
-    expect(calls.some((url) => url.includes('/api/dashboard/admin?institutionId=2'))).toBe(true);
-
-    // Returning to the overview clears the tenant view again.
-    await user.click(screen.getByRole('button', { name: /back to platform overview/i }));
-    await waitFor(() => expect(screen.queryByText('Papers without questions')).not.toBeInTheDocument());
-    expect(calls.filter((url) => url.includes('/api/dashboard/admin') && !url.includes('institutionId=2'))).toEqual([]);
+    expect(screen.queryByText('Papers without questions')).not.toBeInTheDocument();
   });
+
+  it('reports a tenant dashboard at its own address, named from the payload', async () => {
+    // Platform staff hold no institution, so the heading must come from the institution
+    // being viewed rather than from the viewer's own account.
+    const fetchMock = vi.fn(async (...args: [RequestInfo | URL]) =>
+      new Response(
+        JSON.stringify({
+          data: {
+            ...adminPayload(),
+            institution: { id: 7, name: 'Muhanga Polytechnic', code: 'MP', type: 'college', is_demo: 0 },
+            /* The view must follow the address, so the request is recorded with its query. */
+            requested: String(args[0]),
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/institutions/7/dashboard']}>
+          <Routes>
+            <Route path="/institutions/:institutionId/dashboard" element={<InstitutionDashboardPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Muhanga Polytechnic' })).toBeInTheDocument();
+    // The scoped request carries the institution named in the address.
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('/api/dashboard/admin?institutionId=7'))).toBe(true);
+    expect(screen.getByRole('button', { name: 'Back to institutions' })).toBeInTheDocument();
+  });
+
 
 describe('platform dashboard', () => {
   afterEach(() => {

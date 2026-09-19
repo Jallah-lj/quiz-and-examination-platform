@@ -1,13 +1,11 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { formatDateTime, formatNumber, titleCase } from '../../lib/format';
-import { Badge, Card, DataTable, Loading, PageHeader, ProgressBar, SelectInput, StatCard } from '../../components/ui';
+import { Badge, Card, DataTable, Loading, PageHeader, ProgressBar, StatCard } from '../../components/ui';
 import { ErrorState } from '../../components/StatusPages';
 import { BarChart, TrendChart } from '../../components/charts';
-import { AttentionPanel, MetricList, StatDelta } from '../../components/dashboard';
-import { InstitutionDashboardView } from './InstitutionDashboardView';
+import { AttentionPanel, StatDelta } from '../../components/dashboard';
 import type { PlatformDashboard } from '../../types';
 
 const ACCOUNT_STATUS_LABELS: Record<string, string> = {
@@ -17,40 +15,39 @@ const ACCOUNT_STATUS_LABELS: Record<string, string> = {
   disabled: 'Disabled',
 };
 
+/**
+ * Platform administration — the dashboard every platform administrator lands on.
+ *
+ * This is the operator's view of the service, not of any one institution's teaching: it
+ * reports tenancy, accounts and platform activity, and every tenant figure is linked
+ * through to that institution's own dashboard rather than duplicated here.
+ */
 export default function PlatformDashboardPage() {
-  // Which tenant, if any, the platform administrator is currently inspecting.
-  const [inspectedId, setInspectedId] = useState<number | null>(null);
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['dashboard', 'platform'],
     queryFn: () => api.get<PlatformDashboard>('/dashboard/platform'),
     refetchInterval: 120_000,
   });
 
-  if (isLoading) return <Loading label="Loading platform overview…" />;
-  if (error || !data) return <ErrorState message="The platform overview could not be loaded." onRetry={() => void refetch()} />;
+  if (isLoading) return <Loading label="Loading the platform dashboard…" />;
+  if (error || !data) return <ErrorState message="The platform dashboard could not be loaded." onRetry={() => void refetch()} />;
 
-  const counts = data.counts;
+  const { counts } = data;
   const failedLogins = data.loginActivity.reduce((sum, day) => sum + day.failed, 0);
   const successfulLogins = data.loginActivity.reduce((sum, day) => sum + day.successful, 0);
-  // Institutions ranked by the attempt volume recorded in the last 30 days.
-  const activeInstitutions = [...data.institutionBreakdown]
-    .sort((a, b) => b.attempts - a.attempts)
-    .map((institution) => ({
-      id: institution.id,
-      label: institution.name,
-      value: institution.attempts,
-      meta: `${institution.students} candidates · ${institution.teachers} examiners`,
-    }));
-
-  // The internal platform office is not a tenant, so it is not offered for inspection.
-  const tenants = data.institutionBreakdown.filter((institution) => institution.code !== 'PLATFORM');
-  const inspected = tenants.find((institution) => institution.id === inspectedId) ?? null;
+  // The busiest tenant sets the scale for the usage column, so the bar lengths compare.
+  const busiest = data.institutionBreakdown.reduce((max, row) => Math.max(max, row.attempts), 0);
 
   return (
     <div className="page">
       <PageHeader
-        title="Platform overview"
-        description={`Cross-institution operations · server time ${formatDateTime(data.serverTime)}`}
+        title="Platform administration"
+        description={
+          <>
+            Cross-institution operations for {counts.institutions} institution{counts.institutions === 1 ? '' : 's'} ·
+            server time {formatDateTime(data.serverTime)}
+          </>
+        }
         actions={
           <>
             <Link className="btn" to="/audit-logs">
@@ -63,8 +60,9 @@ export default function PlatformDashboardPage() {
         }
       />
 
-      <AttentionPanel items={data.attention} title="Platform attention" />
+      <AttentionPanel items={data.attention} title="Needs attention" />
 
+      {/* Tenancy and accounts first, then assessment activity. */}
       <div className="stat-grid">
         <StatCard
           label="Institutions"
@@ -75,9 +73,14 @@ export default function PlatformDashboardPage() {
         <StatCard
           label="User accounts"
           value={formatNumber(counts.users)}
-          meta={`${counts.active_users} active`}
+          meta={`${counts.active_users} active · ${counts.active_sessions} sessions open`}
         />
         <StatCard label="Candidates" value={formatNumber(counts.students)} meta={`${counts.teachers} examiners`} />
+        <StatCard
+          label="Examinations"
+          value={counts.exams}
+          meta={`${counts.active_exams} active · ${counts.questions} questions banked`}
+        />
         <StatCard
           label="Submissions"
           value={formatNumber(counts.attempts)}
@@ -88,22 +91,26 @@ export default function PlatformDashboardPage() {
           value={formatNumber(data.deltas.signups.current)}
           meta={<StatDelta delta={data.deltas.signups} />}
         />
-        <StatCard label="Examinations" value={counts.exams} meta={`${counts.active_exams} active · ${counts.questions} questions`} />
         <StatCard
-          label="Live attempts"
+          label="Attempts in progress"
           value={counts.live_attempts}
           tone={counts.live_attempts > 0 ? 'accent' : 'neutral'}
           meta="Timed attempts currently open"
         />
         <StatCard
-          label="Active sessions"
-          value={counts.active_sessions}
-          meta={`${successfulLogins} sign-ins · ${failedLogins} failures (14 days)`}
+          label="Sign-ins"
+          value={formatNumber(successfulLogins)}
+          meta={`${failedLogins} failure${failedLogins === 1 ? '' : 's'} in the last 14 days`}
         />
       </div>
 
-      <div className="split-2">
-        <Card title="Submissions over time" description="Attempts submitted platform-wide over the last 30 days.">
+      {/* The daily series carries thirty values, so it takes the wider half of the pair. */}
+      <div className="dashboard-charts">
+        <Card
+          className="card--chart"
+          title="Submissions over time"
+          description="Attempts submitted platform-wide over the last 30 days."
+        >
           <TrendChart
             ariaLabel="Submissions per day platform-wide over the last thirty days"
             unit="submissions"
@@ -114,7 +121,11 @@ export default function PlatformDashboardPage() {
             }))}
           />
         </Card>
-        <Card title="Sign-in activity" description="Successful and failed sign-ins over the last 14 days.">
+        <Card
+          className="card--chart"
+          title="Sign-in activity"
+          description="Successful sign-ins each day over the last 14 days."
+        >
           <BarChart
             ariaLabel="Successful sign-ins per day over the last fourteen days"
             unit="successful sign-ins"
@@ -125,11 +136,96 @@ export default function PlatformDashboardPage() {
             }))}
           />
           <p className="text-sm text-muted">
-            {successfulLogins} successful and {failedLogins} failed attempts in the last 14 days. Repeated failures trigger the
-            lockout policy and are recorded in the audit log.
+            {failedLogins === 0
+              ? 'No failed sign-ins in the last 14 days.'
+              : `${failedLogins} failed sign-in${failedLogins === 1 ? '' : 's'} in the last 14 days. Repeat failures trigger the lockout policy and are recorded in the audit log.`}
           </p>
         </Card>
       </div>
+
+      {/*
+       * Every tenant, with its usage. This is the whole of the platform's institution
+       * reporting — the dashboard deliberately does not repeat it as a separate ranking.
+       */}
+      <Card
+        title="Institutions"
+        description="Every institution on the platform, with its recorded usage."
+        flush
+        actions={
+          <Link className="btn btn--sm" to="/institutions">
+            Manage
+          </Link>
+        }
+      >
+        <DataTable
+          rows={data.institutionBreakdown}
+          rowKey={(row) => row.id}
+          empty={<p>No institutions have been created yet.</p>}
+          columns={[
+            {
+              key: 'name',
+              header: 'Institution',
+              render: (row) => (
+                <div className="cell-stack">
+                  <strong>{row.name}</strong>
+                  <span>{row.code}</span>
+                </div>
+              ),
+            },
+            {
+              key: 'status',
+              header: 'Status',
+              render: (row) => (
+                <Badge tone={row.status === 'active' ? 'success' : row.status === 'suspended' ? 'warning' : 'outline'}>
+                  {titleCase(row.status)}
+                </Badge>
+              ),
+            },
+            {
+              key: 'demo',
+              header: 'Data set',
+              render: (row) =>
+                row.is_demo ? <Badge tone="warning">Demonstration</Badge> : <Badge tone="outline">Production</Badge>,
+            },
+            { key: 'students', header: 'Candidates', align: 'right', render: (row) => formatNumber(row.students) },
+            { key: 'teachers', header: 'Examiners', align: 'right', render: (row) => formatNumber(row.teachers) },
+            { key: 'exams', header: 'Examinations', align: 'right', render: (row) => formatNumber(row.exams) },
+            {
+              key: 'attempts',
+              header: 'Attempts',
+              align: 'right',
+              render: (row) => (
+                <div className="progress-cell">
+                  <ProgressBar value={busiest ? (row.attempts / busiest) * 100 : 0} />
+                  <span>{formatNumber(row.attempts)}</span>
+                </div>
+              ),
+            },
+            {
+              key: 'inspect',
+              header: '',
+              align: 'right',
+              render: (row) =>
+                /*
+                 * The platform office is the operator's own record, not a teaching tenant:
+                 * its dashboard holds no candidates, papers or results by design, so it is
+                 * marked as not applicable rather than linked to an empty page.
+                 */
+                row.code === 'PLATFORM' ? (
+                  <span className="text-sm text-muted">Not a tenant</span>
+                ) : (
+                  <Link
+                    className="btn btn--sm"
+                    to={`/institutions/${row.id}/dashboard`}
+                    aria-label={`Open the dashboard for ${row.name}`}
+                  >
+                    Dashboard
+                  </Link>
+                ),
+            },
+          ]}
+        />
+      </Card>
 
       <div className="split-2">
         <Card title="Institution status" description="Every institution by its recorded status." flush>
@@ -158,101 +254,9 @@ export default function PlatformDashboardPage() {
         </Card>
       </div>
 
-      <Card title="Where activity is happening" description="Attempt volume by institution over the recorded history.">
-        <MetricList
-          items={activeInstitutions}
-          valueSuffix=""
-          emptyLabel="No institution has recorded any attempt yet."
-        />
-      </Card>
-
-      <Card title="Institutions" description="Usage per institution, including demonstration data." flush>
-        <DataTable
-          rows={data.institutionBreakdown}
-          rowKey={(row) => row.id}
-          columns={[
-            {
-              key: 'name',
-              header: 'Institution',
-              render: (row) => (
-                <div>
-                  <strong>{row.name}</strong>
-                  <div className="text-sm text-muted">{row.code}</div>
-                </div>
-              ),
-            },
-            {
-              key: 'status',
-              header: 'Status',
-              render: (row) => (
-                <Badge tone={row.status === 'active' ? 'success' : row.status === 'suspended' ? 'warning' : 'outline'}>
-                  {titleCase(row.status)}
-                </Badge>
-              ),
-            },
-            {
-              key: 'demo',
-              header: 'Data set',
-              render: (row) => (row.is_demo ? <Badge tone="warning">Demonstration</Badge> : <Badge tone="outline">Production</Badge>),
-            },
-            { key: 'students', header: 'Candidates', align: 'right', render: (row) => formatNumber(row.students) },
-            { key: 'teachers', header: 'Examiners', align: 'right', render: (row) => formatNumber(row.teachers) },
-            { key: 'exams', header: 'Examinations', align: 'right', render: (row) => formatNumber(row.exams) },
-            {
-              key: 'attempts',
-              header: 'Attempts',
-              align: 'right',
-              render: (row) => (
-                <div className="progress-cell">
-                  <ProgressBar
-                    value={activeInstitutions[0] ? (row.attempts / activeInstitutions[0].value) * 100 : 0}
-                  />
-                  <span>{formatNumber(row.attempts)}</span>
-                </div>
-              ),
-            },
-                        {
-                key: 'inspect',
-                header: '',
-                align: 'right',
-                render: (row) => (
-                  <button
-                    type="button"
-                    className="btn btn--sm"
-                    aria-label={`Open the dashboard for ${row.name}`}
-                    onClick={() => setInspectedId(row.id)}
-                  >
-                    Dashboard
-                  </button>
-                ),
-              },
-]}
-        />
-      </Card>
-
-      <Card
-        title="Institution dashboard"
-        description="Institution-scoped figures below are aggregated from that institution's own records. A platform administrator holds no institution of their own, so one has to be chosen explicitly."
-      >
-        <SelectInput
-          label="Institution"
-          value={inspectedId === null ? '' : String(inspectedId)}
-          onChange={(event) => setInspectedId(event.target.value ? Number(event.target.value) : null)}
-          options={tenants.map((institution) => ({
-            value: String(institution.id),
-            label: `${institution.name} (${institution.code})`,
-          }))}
-          placeholder="Select an institution to inspect"
-          hint="Nothing is shown until an institution is selected."
-        />
-      </Card>
-
-      {inspected ? (
-        <InstitutionDashboardView institutionId={inspected.id} heading={inspected.name} onBack={() => setInspectedId(null)} />
-      ) : null}
-
       <Card
         title="Latest platform activity"
+        description="Every action below is recorded in the audit log."
         flush
         actions={
           <Link className="btn btn--sm" to="/audit-logs">

@@ -8,7 +8,7 @@ import { useAuth } from './context/AuthContext';
 const AuthPages = lazy(() => import('./pages/auth/AuthPages'));
 const ProfilePage = lazy(() => import('./pages/auth/ProfilePage'));
 const DashboardPage = lazy(() => import('./pages/dashboard/DashboardPage'));
-const PlatformDashboardPage = lazy(() => import('./pages/dashboard/PlatformDashboardPage'));
+const InstitutionDashboardPage = lazy(() => import('./pages/dashboard/InstitutionDashboardPage'));
 const InstitutionsPage = lazy(() => import('./pages/admin/InstitutionsPage'));
 const StudentsPage = lazy(() => import('./pages/admin/StudentsPage'));
 const TeachersPage = lazy(() => import('./pages/admin/TeachersPage'));
@@ -82,11 +82,14 @@ export default function App() {
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
 
+          {/* The platform dashboard is the platform administrator's dashboard, so the old
+              address — and any bookmark of it — resolves to the dashboard itself. */}
+          <Route path="/platform" element={<Navigate to="/dashboard" replace />} />
           <Route
-            path="/platform"
+            path="/institutions/:institutionId/dashboard"
             element={
-              <RequirePermission permissions={['platform.manage', 'institution.view_all']}>
-                <PlatformDashboardPage />
+              <RequirePermission permissions={['institution.view_all']}>
+                <InstitutionDashboardPage />
               </RequirePermission>
             }
           />
