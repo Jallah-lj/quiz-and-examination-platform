@@ -26,6 +26,7 @@ const ADMIN = {
 interface Call {
   url: string;
   method: string;
+  body?: string;
   authorization?: string;
   sessionHeader?: string;
   csrf?: string;
@@ -45,6 +46,7 @@ function installTransport(
     calls.push({
       url,
       method,
+      body: init?.body === undefined ? undefined : String(init.body),
       authorization: headers.Authorization,
       sessionHeader: headers['X-Session-Token'],
       csrf: headers['X-CSRF-Token'],
@@ -65,6 +67,21 @@ function installTransport(
           ...(sessionToken ? { sessionToken, tokenTransport: 'bearer' } : {}),
         },
       });
+    }
+    if (url.endsWith('/api/auth/public-institutions')) {
+      return respond({ data: [{ id: 2, name: 'Northgate Institute of Technology', code: 'NIT', country: 'Rwanda' }] });
+    }
+    if (url.endsWith('/api/auth/register')) {
+      return respond(
+        {
+          data: {
+            message:
+              'Your registration has been received. An administrator must activate your account before you can sign in.',
+            userId: 41,
+          },
+        },
+        201,
+      );
     }
     if (url.endsWith('/api/auth/me')) {
       return respond({
@@ -97,6 +114,77 @@ function renderLogin() {
     </QueryClientProvider>,
   );
 }
+
+describe('candidate registration', () => {
+  function renderRegister() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={['/register']}>
+            <Routes>
+              <Route path="/register" element={<AuthPages initialView="register" />} />
+              <Route path="/login" element={<p>Sign in</p>} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('submits the contact details the registry needs to vet the account', async () => {
+    const calls = installTransport();
+    const user = userEvent.setup();
+    renderRegister();
+
+    await user.type(await screen.findByLabelText('Full name'), 'Aline Uwase');
+    await user.type(screen.getByLabelText('Email address'), 'aline.uwase@northgate.edu');
+    await user.type(screen.getByLabelText('Password'), 'Candidate-Password1');
+    await user.type(screen.getByLabelText('Confirm password'), 'Candidate-Password1');
+    await user.selectOptions(screen.getByLabelText('Institution'), '2');
+    await user.type(screen.getByLabelText('Phone'), '+250 788 123 456');
+    await user.type(screen.getByLabelText('Date of birth'), '2006-04-17');
+    await user.selectOptions(screen.getByLabelText('Gender'), 'female');
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+
+    const registration = await waitFor(() => {
+      const call = calls.find((entry) => entry.url.endsWith('/api/auth/register'));
+      if (!call) throw new Error('registration was not submitted');
+      return call;
+    });
+    expect(registration.method).toBe('POST');
+    const sent = JSON.parse(String(registration.body));
+    expect(sent).toMatchObject({
+      fullName: 'Aline Uwase',
+      email: 'aline.uwase@northgate.edu',
+      institutionId: 2,
+      phone: '+250 788 123 456',
+      dateOfBirth: '2006-04-17',
+      gender: 'female',
+    });
+    // The account is not usable yet, and the confirmation says so rather than implying a login.
+    expect(await screen.findByText(/administrator must activate/i)).toBeTruthy();
+  });
+
+  it('catches an unusable phone number or date of birth before sending anything', async () => {
+    const calls = installTransport();
+    const user = userEvent.setup();
+    renderRegister();
+
+    await user.type(await screen.findByLabelText('Full name'), 'Aline Uwase');
+    await user.type(screen.getByLabelText('Email address'), 'aline.uwase@northgate.edu');
+    await user.type(screen.getByLabelText('Password'), 'Candidate-Password1');
+    await user.type(screen.getByLabelText('Confirm password'), 'Candidate-Password1');
+    await user.selectOptions(screen.getByLabelText('Institution'), '2');
+    await user.type(screen.getByLabelText('Phone'), 'call me instead');
+    await user.type(screen.getByLabelText('Date of birth'), '2099-01-01');
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+
+    expect(await screen.findByText('Use digits, spaces and the characters + ( ) - . only.')).toBeTruthy();
+    expect(screen.getByText('Date of birth cannot be in the future.')).toBeTruthy();
+    expect(calls.some((entry) => entry.url.endsWith('/api/auth/register'))).toBe(false);
+  });
+});
 
 describe('sign-in flow', () => {
   beforeEach(() => {

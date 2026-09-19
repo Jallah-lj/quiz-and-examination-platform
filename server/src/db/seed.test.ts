@@ -39,6 +39,49 @@ describe('seed integrity', () => {
     ).toBe(0);
   });
 
+  it('seeds registrations that are genuinely waiting for approval', async () => {
+    await seedDatabase(db);
+
+    /*
+     * The approval queue is the one screen that is empty in a fresh installation, so the seed
+     * populates it. Each waiting candidate must carry the details the public form now
+     * requires — that is what an administrator reads before deciding — and an inactive
+     * registry row, because nothing about a pending registration is active yet.
+     */
+    const candidates = db
+      .prepare(
+        `SELECT u.full_name, u.phone, s.status, s.date_of_birth, s.gender, s.class_id
+           FROM users u JOIN students s ON s.user_id = u.id
+          WHERE u.status = 'pending' AND u.deleted_at IS NULL`,
+      )
+      .all() as {
+      full_name: string;
+      phone: string | null;
+      status: string;
+      date_of_birth: string | null;
+      gender: string | null;
+      class_id: number | null;
+    }[];
+
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const candidate of candidates) {
+      expect(candidate.phone).toBeTruthy();
+      expect(candidate.date_of_birth).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(candidate.gender).toBeTruthy();
+      expect(candidate.status).toBe('inactive');
+      // Unclassed until the registry places them; approval does not invent a class.
+      expect(candidate.class_id).toBeNull();
+    }
+
+    // No pending account may hold a live session.
+    expect(
+      count(
+        `SELECT COUNT(*) AS c FROM sessions se JOIN users u ON u.id = se.user_id
+          WHERE u.status = 'pending' AND se.revoked_at IS NULL`,
+      ),
+    ).toBe(0);
+  });
+
   it('seeds written work for the marking queue without inventing impossible states', async () => {
     const seeded = await seedDatabase(db);
     const inReview = count(`SELECT COUNT(*) AS c FROM attempts WHERE status = 'UNDER_REVIEW'`);

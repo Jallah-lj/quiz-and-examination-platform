@@ -446,6 +446,110 @@ export async function updatePerson(
   });
 }
 
+interface ManagedAccount {
+  id: number;
+  institution_id: number | null;
+  status: string;
+  full_name: string;
+  email: string;
+  role_code: RoleCode;
+}
+
+/**
+ * Loads an account for an administrative write and applies the rules every such write
+ * shares. An account outside the actor's institution is reported as missing rather than
+ * refused, so the response never confirms that a user exists in another institution.
+ */
+function loadManagedAccount(db: Db, actor: PeopleActor, targetUserId: number): ManagedAccount {
+  const target = db
+    .prepare(
+      'SELECT u.id, u.institution_id, u.status, u.full_name, u.email, r.code AS role_code FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?',
+    )
+    .get(targetUserId) as ManagedAccount | undefined;
+  if (!target) throw notFound('User not found.');
+  if (actor.roleCode !== 'super_admin') {
+    if (target.institution_id !== actor.institutionId) throw notFound('User not found.');
+    if (target.role_code === 'super_admin') {
+      throw forbidden('You cannot modify a platform administrator.');
+    }
+  }
+  return target;
+}
+
+/** The student and teacher registry rows carry their own status, kept in step with the account. */
+function mirrorRegistryStatus(
+  db: Db,
+  targetUserId: number,
+  status: 'active' | 'suspended' | 'disabled' | 'pending',
+  timestamp: string,
+): void {
+  const registryStatus = status === 'active' ? 'active' : status === 'pending' ? 'inactive' : 'suspended';
+  db.prepare('UPDATE students SET status = ?, updated_at = ? WHERE user_id = ?').run(
+    registryStatus,
+    timestamp,
+    targetUserId,
+  );
+  db.prepare('UPDATE teachers SET status = ?, updated_at = ? WHERE user_id = ?').run(
+    registryStatus,
+    timestamp,
+    targetUserId,
+  );
+}
+
+/**
+ * Approves a self-registered candidate. This is the one transition that lets a `pending`
+ * account sign in, so it is deliberately narrow: only an account that is actually awaiting
+ * approval can be approved, and the registry row is activated in the same transaction as
+ * the account. The candidate is notified, because nothing else would tell them to try again.
+ */
+export function approvePendingUser(
+  db: Db,
+  actor: PeopleActor,
+  targetUserId: number,
+  meta: { ip?: string | null; userAgent?: string | null } = {},
+): { id: number; fullName: string } {
+  const target = loadManagedAccount(db, actor, targetUserId);
+  if (target.status === 'active') {
+    throw validationError('This account has already been approved.');
+  }
+  if (target.status !== 'pending') {
+    throw validationError(
+      `This account is ${target.status}; only a registration awaiting approval can be approved.`,
+    );
+  }
+
+  const timestamp = nowIso();
+  db.transaction(() => {
+    db.prepare('UPDATE users SET status = ?, updated_at = ? WHERE id = ?').run('active', timestamp, targetUserId);
+    mirrorRegistryStatus(db, targetUserId, 'active', timestamp);
+  })();
+
+  createNotification(db, {
+    institutionId: target.institution_id,
+    userId: targetUserId,
+    type: 'account_approved',
+    title: 'Registration approved',
+    body: 'An administrator approved your registration. You can now sign in with the email address and password you registered with.',
+    severity: 'success',
+  });
+
+  recordAudit(db, {
+    institutionId: target.institution_id,
+    userId: actor.id,
+    actorName: actor.fullName,
+    actorRole: actor.roleCode,
+    action: 'user.approved',
+    category: 'user',
+    resourceType: 'user',
+    resourceId: targetUserId,
+    description: `Registration for ${target.full_name} approved`,
+    metadata: { from: 'pending', to: 'active' },
+    ...meta,
+  });
+
+  return { id: targetUserId, fullName: target.full_name };
+}
+
 export function setUserStatus(
   db: Db,
   actor: PeopleActor,
@@ -453,19 +557,9 @@ export function setUserStatus(
   status: 'active' | 'suspended' | 'disabled' | 'pending',
   meta: { ip?: string | null; userAgent?: string | null } = {},
 ): void {
-  const target = db
-    .prepare('SELECT u.id, u.institution_id, u.status, u.full_name, r.code AS role_code FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?')
-    .get(targetUserId) as any;
-  if (!target) throw notFound('User not found.');
+  const target = loadManagedAccount(db, actor, targetUserId);
   if (actor.id === targetUserId && status !== 'active') {
     throw validationError('You cannot deactivate your own account.');
-  }
-  if (actor.roleCode !== 'super_admin') {
-    if (target.institution_id !== actor.institutionId) throw forbidden('Cross-institution operation blocked.');
-    if (target.role_code === 'super_admin') throw forbidden('You cannot modify a platform administrator.');
-  }
-  if (target.role_code === 'super_admin' && actor.roleCode !== 'super_admin') {
-    throw forbidden('You cannot modify a platform administrator.');
   }
 
   const timestamp = nowIso();
@@ -478,16 +572,7 @@ export function setUserStatus(
         targetUserId,
       );
     }
-    db.prepare('UPDATE students SET status = ?, updated_at = ? WHERE user_id = ?').run(
-      status === 'active' ? 'active' : status === 'pending' ? 'inactive' : 'suspended',
-      timestamp,
-      targetUserId,
-    );
-    db.prepare('UPDATE teachers SET status = ?, updated_at = ? WHERE user_id = ?').run(
-      status === 'active' ? 'active' : status === 'pending' ? 'inactive' : 'suspended',
-      timestamp,
-      targetUserId,
-    );
+    mirrorRegistryStatus(db, targetUserId, status, timestamp);
   })();
 
   recordAudit(db, {

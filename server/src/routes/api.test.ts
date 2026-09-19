@@ -129,6 +129,151 @@ describe('authentication', () => {
   });
 });
 
+describe('candidate self-registration and approval', () => {
+  const candidate = {
+    fullName: 'Aline Uwase',
+    email: 'aline.uwase@alpha.test',
+    password: 'Candidate-Password1',
+    phone: '+250 788 123 456',
+    dateOfBirth: '2006-04-17',
+    gender: 'female',
+  };
+
+  const register = (overrides: Partial<typeof candidate> = {}) =>
+    harness.agent().post('/api/auth/register').send({ ...candidate, ...overrides, institutionId: fixture.institutionId });
+
+  const signIn = (password = candidate.password) =>
+    harness.agent().post('/api/auth/login').send({ email: candidate.email, password });
+
+  it('stores the details the candidate supplies and keeps the account out until it is approved', async () => {
+    const response = await register();
+    expect(response.status).toBe(201);
+    const userId = response.body.data.userId as number;
+
+    const user = db.prepare('SELECT status, phone, institution_id FROM users WHERE id = ?').get(userId) as any;
+    expect(user).toMatchObject({ status: 'pending', phone: '+250 788 123 456', institution_id: fixture.institutionId });
+
+    const student = db
+      .prepare('SELECT date_of_birth, gender, student_code, status FROM students WHERE user_id = ?')
+      .get(userId) as any;
+    expect(student).toMatchObject({ date_of_birth: '2006-04-17', gender: 'female', status: 'inactive' });
+    // A registration without a matriculation number still gets a registry reference.
+    expect(student.student_code).toMatch(/^REG-\d{5}$/);
+
+    // The account exists, but the credentials it chose do not open a session yet.
+    const blocked = await signIn();
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.message).toMatch(/awaiting approval/i);
+    expect(blocked.headers['set-cookie']).toBeUndefined();
+
+    // It reaches the administrator's queue, carrying what the candidate entered.
+    const admin = await harness.login('admin@alpha.test');
+    const queue = await admin.get('/api/users?status=pending');
+    expect(queue.status).toBe(200);
+    const row = queue.body.data.find((item: any) => item.id === userId);
+    expect(row).toMatchObject({
+      full_name: 'Aline Uwase',
+      phone: '+250 788 123 456',
+      date_of_birth: '2006-04-17',
+      gender: 'female',
+      role: 'student',
+    });
+
+    // The dashboard already points the administrator at the queue.
+    const dashboard = await admin.get('/api/dashboard/admin');
+    expect(
+      (dashboard.body.data.attention as any[]).some((item) => item.link === '/users?status=pending'),
+    ).toBe(true);
+
+    const approved = await admin.post(`/api/users/${userId}/approve`);
+    expect(approved.status).toBe(200);
+    expect(approved.body.data.message).toBe('Aline Uwase can now sign in.');
+
+    // Account and registry row move together, and the decision is recorded.
+    expect((db.prepare('SELECT status FROM users WHERE id = ?').get(userId) as any).status).toBe('active');
+    expect((db.prepare('SELECT status FROM students WHERE user_id = ?').get(userId) as any).status).toBe('active');
+    // audit_logs.resource_id is TEXT, so the id is compared as a string.
+    const audit = db
+      .prepare("SELECT description, metadata FROM audit_logs WHERE action = 'user.approved' AND resource_id = ?")
+      .get(String(userId)) as any;
+    expect(audit.description).toBe('Registration for Aline Uwase approved');
+    expect(JSON.parse(audit.metadata)).toMatchObject({ from: 'pending', to: 'active' });
+    const notification = db
+      .prepare("SELECT title FROM notifications WHERE user_id = ? AND type = 'account_approved'")
+      .get(userId) as any;
+    expect(notification.title).toBe('Registration approved');
+
+    // And now, and only now, the candidate can sign in.
+    const signedIn = await signIn();
+    expect(signedIn.status).toBe(200);
+    expect(signedIn.body.data.user.role).toBe('student');
+  });
+
+  it('will not approve an account that is not waiting, or approve one twice', async () => {
+    const userId = (await register()).body.data.userId as number;
+    const admin = await harness.login('admin@alpha.test');
+
+    expect((await admin.post(`/api/users/${userId}/approve`)).status).toBe(200);
+    const again = await admin.post(`/api/users/${userId}/approve`);
+    expect(again.status).toBe(422);
+    expect(again.body.error.message).toMatch(/already been approved/i);
+
+    // An account suspended after approval is not re-approved by this route either.
+    await admin.post(`/api/users/${userId}/status`).send({ status: 'suspended' });
+    const suspended = await admin.post(`/api/users/${userId}/approve`);
+    expect(suspended.status).toBe(422);
+    expect((db.prepare('SELECT status FROM users WHERE id = ?').get(userId) as any).status).toBe('suspended');
+  });
+
+  it('keeps the registrations of one institution out of another institution queue', async () => {
+    const userId = (
+      await harness.agent().post('/api/auth/register').send({
+        ...candidate,
+        email: 'aline.beta@beta.test',
+        institutionId: fixture.otherInstitutionId,
+      })
+    ).body.data.userId as number;
+
+    const alphaAdmin = await harness.login('admin@alpha.test');
+    // Reported as missing rather than refused, so the response never confirms the account.
+    expect((await alphaAdmin.post(`/api/users/${userId}/approve`)).status).toBe(404);
+    expect((await alphaAdmin.get(`/api/users/${userId}`)).status).toBe(404);
+    expect((db.prepare('SELECT status FROM users WHERE id = ?').get(userId) as any).status).toBe('pending');
+
+    // The platform administrator, who is not scoped to one institution, can approve it.
+    const platform = await harness.login('platform@examsys.test');
+    expect((await platform.post(`/api/users/${userId}/approve`)).status).toBe(200);
+  });
+
+  it('refuses a registration whose details could not be used', async () => {
+    const future = await register({ dateOfBirth: '2099-01-01' });
+    expect(future.status).toBe(422);
+    expect(future.body.error.details).toContainEqual({
+      field: 'dateOfBirth',
+      message: 'Date of birth cannot be in the future.',
+    });
+
+    // 31 February is a date-shaped string, not a date.
+    expect((await register({ dateOfBirth: '2006-02-31' })).status).toBe(422);
+    expect((await register({ dateOfBirth: '17/04/2006' })).status).toBe(422);
+    expect((await register({ phone: 'call me' })).status).toBe(422);
+    expect((await register({ phone: '123' })).status).toBe(422);
+    expect((await register({ gender: 'wizard' as never })).status).toBe(422);
+
+    // The fields are not optional: a registration without them is not accepted.
+    const { phone, dateOfBirth, ...withoutDetails } = candidate;
+    const missing = await harness.agent()
+      .post('/api/auth/register')
+      .send({ ...withoutDetails, institutionId: fixture.institutionId });
+    expect(missing.status).toBe(422);
+
+    // Nothing was written by any of those attempts.
+    expect(
+      (db.prepare('SELECT COUNT(*) AS c FROM users WHERE email = ?').get(candidate.email) as any).c,
+    ).toBe(0);
+  });
+});
+
 describe('access control', () => {
   it('requires authentication for protected endpoints', async () => {
     const response = await harness.agent().get('/api/students');

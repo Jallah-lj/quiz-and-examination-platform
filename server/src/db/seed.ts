@@ -787,6 +787,82 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
   counts.results = seeded.results;
   counts.awaiting_marking = seeded.pending;
 
+  // ------------------------------------------- candidates awaiting approval
+  /*
+   * Two people registered themselves and are waiting for an administrator. A fresh
+   * installation has an empty approval queue, and an empty queue cannot be exercised — the
+   * same reason the seed ships a marking backlog. These accounts are `pending`: they are
+   * listed for the administrator, and they cannot sign in until the registration is
+   * approved, exactly as a registration made through the public form behaves.
+   */
+  const pendingRegistrations = [
+    {
+      name: 'Nadia Habimana',
+      email: 'demo.pending1@northgate.edu',
+      phone: '+250 788 445 001',
+      dateOfBirth: '2006-02-11',
+      gender: 'female',
+      studentCode: 'REG-00001',
+      registeredDaysAgo: 2,
+    },
+    {
+      name: 'Eric Nkurunziza',
+      email: 'demo.pending2@northgate.edu',
+      phone: '+250 788 445 002',
+      dateOfBirth: '2005-11-30',
+      gender: 'male',
+      studentCode: 'REG-00002',
+      registeredDaysAgo: 1,
+    },
+  ];
+  for (const candidate of pendingRegistrations) {
+    const registeredAt = daysFromNow(-candidate.registeredDaysAgo);
+    const userInfo = db
+      .prepare(
+        `INSERT INTO users (institution_id, role_id, full_name, email, password_hash, status, phone, created_at, updated_at)
+         VALUES (?,?,?,?,?, 'pending', ?, ?, ?)`,
+      )
+      .run(
+        institutionId,
+        roleId('student'),
+        candidate.name,
+        candidate.email,
+        passwordHash,
+        candidate.phone,
+        registeredAt,
+        registeredAt,
+      );
+    // No class and no matriculation number yet: the registry assigns those on approval.
+    db.prepare(
+      `INSERT INTO students (user_id, institution_id, class_id, student_code, date_of_birth, gender, status, created_at, updated_at)
+       VALUES (?,?,NULL,?,?,?, 'inactive', ?, ?)`,
+    ).run(
+      Number(userInfo.lastInsertRowid),
+      institutionId,
+      candidate.studentCode,
+      candidate.dateOfBirth,
+      candidate.gender,
+      registeredAt,
+      registeredAt,
+    );
+    db.prepare(
+      `INSERT INTO audit_logs (institution_id, user_id, actor_name, actor_role, action, category, resource_type, description, metadata, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      institutionId,
+      Number(userInfo.lastInsertRowid),
+      candidate.name,
+      'student',
+      'auth.self_registered',
+      'auth',
+      'user',
+      'Candidate self-registered and awaits approval',
+      JSON.stringify({ seeded: true, demo: true }),
+      registeredAt,
+    );
+  }
+  counts.pending_registrations = pendingRegistrations.length;
+
   // --------------------------------------------------------------- notifications
   const notificationSeeds = [
     { type: 'exam_assigned', title: 'New examination assigned', body: 'Midterm Examination — Data Structures & Algorithms is now open.', link: '/examinations' },
@@ -836,6 +912,11 @@ export async function seedDatabase(db: Db): Promise<SeedResult> {
         password: DEMO_PASSWORD,
       })),
       { role: 'Student / Candidate (1–30)', email: 'demo.student001@northgate.edu … demo.student030@northgate.edu', password: DEMO_PASSWORD },
+      {
+        role: 'Candidate awaiting approval',
+        email: 'demo.pending1@northgate.edu, demo.pending2@northgate.edu',
+        password: `${DEMO_PASSWORD} — cannot sign in until an administrator approves the registration`,
+      },
     ],
   };
 }

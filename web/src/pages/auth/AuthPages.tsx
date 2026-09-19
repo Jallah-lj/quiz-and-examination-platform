@@ -129,9 +129,30 @@ function LoginForm() {
   );
 }
 
+/**
+ * The values the registry stores. `undisclosed` is a recorded answer, not a missing one, so
+ * the form offers it explicitly rather than making the field look unanswered.
+ */
+const GENDER_OPTIONS = [
+  { value: 'female', label: 'Female' },
+  { value: 'male', label: 'Male' },
+  { value: 'other', label: 'Other' },
+  { value: 'undisclosed', label: 'Undisclosed' },
+];
+
 function RegisterForm() {
   const toast = useToast();
-  const [form, setForm] = useState({ fullName: '', email: '', password: '', confirm: '', institutionId: '', studentCode: '' });
+  const [form, setForm] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    confirm: '',
+    institutionId: '',
+    studentCode: '',
+    phone: '',
+    dateOfBirth: '',
+    gender: '',
+  });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
@@ -149,6 +170,20 @@ function RegisterForm() {
     if (form.password.length < 10) nextErrors.password = 'Use at least 10 characters.';
     if (form.password !== form.confirm) nextErrors.confirm = 'The passwords do not match.';
     if (!form.institutionId) nextErrors.institutionId = 'Select your institution.';
+    // The same checks the API applies, so nothing is rejected only after a round trip.
+    if (!form.phone.trim()) nextErrors.phone = 'Enter a contact number.';
+    else if (!/^[+()\-.\s0-9]+$/.test(form.phone.trim())) {
+      nextErrors.phone = 'Use digits, spaces and the characters + ( ) - . only.';
+    } else if ((form.phone.match(/[0-9]/g) ?? []).length < 7) {
+      nextErrors.phone = 'Enter at least 7 digits.';
+    }
+    const birth = form.dateOfBirth.trim();
+    if (!birth) nextErrors.dateOfBirth = 'Enter your date of birth.';
+    else if (!/^\d{4}-\d{2}-\d{2}$/.test(birth)) nextErrors.dateOfBirth = 'Use the format YYYY-MM-DD.';
+    else if (birth < '1900-01-01') nextErrors.dateOfBirth = 'That date of birth is too far in the past.';
+    else if (birth > new Date().toISOString().slice(0, 10)) {
+      nextErrors.dateOfBirth = 'Date of birth cannot be in the future.';
+    }
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
 
@@ -160,6 +195,9 @@ function RegisterForm() {
         password: form.password,
         institutionId: Number(form.institutionId),
         studentCode: form.studentCode.trim() || undefined,
+        phone: form.phone.trim(),
+        dateOfBirth: form.dateOfBirth.trim(),
+        gender: form.gender || undefined,
       });
       setDone(response.message);
       toast.notify('Registration submitted.', 'success');
@@ -251,6 +289,52 @@ function RegisterForm() {
             error={errors.studentCode}
             onChange={(event) => update('studentCode', event.target.value)}
           />
+        </div>
+        <div className="field-row">
+          <TextInput
+            label="Phone"
+            type="tel"
+            required
+            autoComplete="tel"
+            hint="The number the registry can reach you on."
+            value={form.phone}
+            error={errors.phone}
+            onChange={(event) => update('phone', event.target.value)}
+          />
+          <TextInput
+            label="Date of birth"
+            type="date"
+            required
+            autoComplete="bday"
+            // Bounded at both ends so the picker cannot offer a date the API would refuse.
+            min="1900-01-01"
+            max={new Date().toISOString().slice(0, 10)}
+            value={form.dateOfBirth}
+            error={errors.dateOfBirth}
+            onChange={(event) => update('dateOfBirth', event.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="register-gender">Gender</label>
+          <select
+            id="register-gender"
+            className="select"
+            value={form.gender}
+            aria-describedby="register-gender-hint"
+            onChange={(event) => update('gender', event.target.value)}
+          >
+            <option value="">Prefer not to say</option>
+            {GENDER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <span className="field__hint" id="register-gender-hint">
+            Optional — recorded on your candidate record. Choose “Undisclosed” if you would
+            rather not say.
+          </span>
+          {errors.gender ? <span className="field__error">{errors.gender}</span> : null}
         </div>
         <Button type="submit" variant="primary" loading={busy} className="btn--block">
           Create account

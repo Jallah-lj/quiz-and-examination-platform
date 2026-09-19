@@ -738,6 +738,10 @@ export interface UserRow {
   email: string;
   status: string;
   phone: string | null;
+  /** From the candidate's own registration; null for accounts that are not students. */
+  date_of_birth: string | null;
+  gender: string | null;
+  student_code: string | null;
   last_login_at: string | null;
   created_at: string;
   institution_id: number | null;

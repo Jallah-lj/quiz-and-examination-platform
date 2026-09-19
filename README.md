@@ -91,6 +91,29 @@ link is emailed rather than returned to the caller:
 - Tokens are never written to logs, and the neutral response to `POST /api/auth/forgot-password`
   is identical whether or not the address exists.
 
+## Candidate registration and approval
+
+Candidates register themselves at `/register` with the details the registry needs to vet the
+account: full name, email, password, institution, and their phone, date of birth and gender
+(with `undisclosed` as an explicit answer). The institution's matriculation number stays
+optional — the registry can match or assign it later.
+
+A registration creates a **pending** account and an **inactive** student record. The password
+chosen at registration does not open a session until an administrator approves it:
+
+- The account appears under `/users?status=pending`, and both administrative dashboards raise
+  it in their exception panel ("N account(s) awaiting approval").
+- `POST /api/users/:id/approve` (permission `user.status`) activates the account and its
+  registry row in one transaction, records `user.approved` in the audit log, and sends the
+  candidate an in-app notification. Only an account that is actually `pending` can be
+  approved; approving one outside the actor's institution reports 404, as if it did not exist.
+- The approval dialog shows what the candidate submitted, including whether they have
+  confirmed their email address, so the decision is made on the record rather than on a name.
+- Declining uses the ordinary status endpoint (`disabled`): the account cannot sign in, and
+  nothing is deleted, so the decision can be reversed with its history intact.
+
+Demo data ships two waiting registrations so the queue is not empty in a fresh installation.
+
 ## Secrets and persistent sessions
 
 Session, CSRF and password-reset tokens are stored as HMACs keyed with `SESSION_SECRET`.

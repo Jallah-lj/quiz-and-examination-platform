@@ -7,7 +7,14 @@ import { listQuery, parseWith } from '../lib/validation';
 import { paginate } from '../types';
 import type { AuthedRequest } from '../types';
 import { requireAuth, requirePermission } from '../middleware/auth';
-import { createUser, requireInstitution, resetUserPassword, setUserStatus, updatePerson } from '../services/people';
+import {
+  approvePendingUser,
+  createUser,
+  requireInstitution,
+  resetUserPassword,
+  setUserStatus,
+  updatePerson,
+} from '../services/people';
 import { PERMISSIONS, ROLE_DEFINITIONS } from '../lib/rbac';
 import { nowIso } from '../lib/time';
 import { unknownPermissionCodes } from '../services/permissions';
@@ -67,9 +74,11 @@ router.get(
         `SELECT u.id, u.full_name, u.email, u.status, u.phone, u.last_login_at, u.created_at,
                 u.institution_id, u.email_verified_at, r.code AS role, r.name AS role_name,
                 i.name AS institution_name,
+                s.date_of_birth, s.gender, s.student_code,
                 CASE WHEN u.locked_until IS NOT NULL AND u.locked_until > ? THEN 1 ELSE 0 END AS locked
            FROM users u JOIN roles r ON r.id = u.role_id
            LEFT JOIN institutions i ON i.id = u.institution_id
+           LEFT JOIN students s ON s.user_id = u.id
            ${whereSql}
            ${orderByClause(query.sort, query.order, { name: 'u.full_name', created: 'u.created_at', role: 'r.name' }, 'u.created_at DESC')}
            LIMIT ? OFFSET ?`,
@@ -330,6 +339,22 @@ router.post(
       userAgent: req.header('user-agent') ?? null,
     });
     return ok(res, { message: `Account status updated to ${body.status}.` });
+  }),
+);
+
+router.post(
+  '/:id/approve',
+  requirePermission('user.status'),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const db = getDb();
+    const result = approvePendingUser(db, req.user!, Number(req.params.id), {
+      ip: req.ip ?? null,
+      userAgent: req.header('user-agent') ?? null,
+    });
+    return ok(res, {
+      message: `${result.fullName} can now sign in.`,
+      userId: result.id,
+    });
   }),
 );
 

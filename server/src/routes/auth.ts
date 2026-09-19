@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { env } from '../config/env';
 import { getDb } from '../db';
 import { asyncHandler, ok } from '../lib/http';
-import { parseWith } from '../lib/validation';
+import { dateOfBirthSchema, genderSchema, parseWith, phoneSchema } from '../lib/validation';
 import { z } from 'zod';
 import { authenticate, extractTokenCandidates, requireAuth } from '../middleware/auth';
 import { createRateLimiter } from '../middleware/security';
@@ -238,6 +238,14 @@ router.post(
         password: z.string().min(10, 'Password must be at least 10 characters long.'),
         institutionId: z.coerce.number().int().positive(),
         studentCode: z.string().trim().max(40).optional(),
+        /*
+         * A candidate registers themselves, so the registry has to be able to vet the
+         * account: a contact number and a date of birth are required, and gender is asked
+         * with an explicit "undisclosed" answer so nobody has to invent one.
+         */
+        phone: phoneSchema,
+        dateOfBirth: dateOfBirthSchema,
+        gender: genderSchema.optional(),
       }),
       req.body,
     );

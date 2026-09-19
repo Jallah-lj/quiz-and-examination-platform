@@ -109,6 +109,12 @@ describe('chart panels contain themselves', () => {
     expect(declarations('.trend__tooltip')['max-width']).toBe('100%');
   });
 
+  it('wraps long values inside their own column', () => {
+    // Emails and reference codes appear in definition lists inside dialogs, where an
+    // unbreakable token is wider than the column it sits in.
+    expect(declarations('.definition-list dd')['overflow-wrap']).toBe('anywhere');
+  });
+
   it('keeps every chart container shrinkable', () => {
     // The dashboard's paired columns: a grid item defaults to min-content, which is wider
     // than the column for a dense chart.

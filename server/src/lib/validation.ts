@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { validationError } from './errors';
+import { nowIso } from './time';
 
 /** Parses with a Zod schema and converts failures into a 422 AppError with field details. */
 export function parseWith<T extends z.ZodTypeAny>(schema: T, data: unknown): z.infer<T> {
@@ -49,6 +50,48 @@ export const passwordSchema = z
   .refine((v) => /[0-9]/.test(v), 'Password must contain at least one number.');
 
 export const nameSchema = z.string().trim().min(2, 'Name is too short.').max(160);
+
+/**
+ * Contact number. Deliberately permissive about formatting — the same number is written
+ * `+250 788 123 456`, `0788-123-456` and `(0788) 123456` by different people — but it must
+ * still contain enough digits to be dialled.
+ */
+export const phoneSchema = z
+  .string()
+  .trim()
+  .min(7, 'Enter a contact number.')
+  .max(40, 'That number is too long.')
+  .regex(/^[+()\-.\s0-9]+$/, 'Use digits, spaces and the characters + ( ) - . only.')
+  .refine((value) => (value.match(/[0-9]/g) ?? []).length >= 7, 'Enter at least 7 digits.');
+
+/**
+ * Gender, as the student registry stores it. The seeded student records use this same
+ * vocabulary, and `undisclosed` is a real answer rather than a missing value — a candidate
+ * who declines to state it is not counted as incomplete data.
+ */
+export const STUDENT_GENDERS = ['female', 'male', 'other', 'undisclosed'] as const;
+export type StudentGender = (typeof STUDENT_GENDERS)[number];
+export const genderSchema = z.enum(STUDENT_GENDERS);
+
+function isRealCalendarDate(value: string): boolean {
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+}
+
+/**
+ * Date of birth on a candidate's own registration. Compared as a plain `YYYY-MM-DD` string:
+ * it is a calendar date, not an instant, so no time zone may shift it by a day.
+ */
+export const dateOfBirthSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the format YYYY-MM-DD.')
+  .refine(isRealCalendarDate, 'That date does not exist.')
+  .refine((value) => value >= '1900-01-01', 'That date of birth is too far in the past.')
+  .refine((value) => value <= nowIso().slice(0, 10), 'Date of birth cannot be in the future.');
 
 /** Escapes user text for safe inclusion in CSV and PDF exports. */
 export function sanitizeCsvValue(value: unknown): string {

@@ -74,6 +74,8 @@ export default function UsersPage() {
   const [editing, setEditing] = useState<UserRow | 'new' | null>(null);
   const [statusTarget, setStatusTarget] = useState<UserRow | null>(null);
   const [resetTarget, setResetTarget] = useState<UserRow | null>(null);
+  const [approveTarget, setApproveTarget] = useState<UserRow | null>(null);
+  const [declineTarget, setDeclineTarget] = useState<UserRow | null>(null);
   const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
 
   const users = useQuery({
@@ -98,11 +100,29 @@ export default function UsersPage() {
     onSuccess: async (_result, variables) => {
       toast.notify(`Account status set to ${variables.status}.`, 'success');
       setStatusTarget(null);
+      setDeclineTarget(null);
       await queryClient.invalidateQueries({ queryKey: ['users'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
     onError: (caught) => {
       toast.notify(caught instanceof ApiError ? caught.message : 'The status could not be changed.', 'error');
       setStatusTarget(null);
+      setDeclineTarget(null);
+    },
+  });
+
+  const approve = useMutation({
+    mutationFn: (id: number) => api.post<{ message: string }>(`/users/${id}/approve`),
+    onSuccess: async (result) => {
+      toast.notify(result.message, 'success');
+      setApproveTarget(null);
+      // The status filter, the pending count and the dashboard panels all move together.
+      await queryClient.invalidateQueries({ queryKey: ['users'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (caught) => {
+      toast.notify(caught instanceof ApiError ? caught.message : 'The registration could not be approved.', 'error');
+      setApproveTarget(null);
     },
   });
 
@@ -259,7 +279,17 @@ export default function UsersPage() {
                               Edit
                             </Button>
                           ) : null}
-                          {hasPermission('user.status') ? (
+                          {hasPermission('user.status') && row.status === 'pending' ? (
+                            <Button size="sm" variant="primary" onClick={() => setApproveTarget(row)}>
+                              Approve
+                            </Button>
+                          ) : null}
+                          {hasPermission('user.status') && row.status === 'pending' ? (
+                            <Button size="sm" variant="ghost" onClick={() => setDeclineTarget(row)}>
+                              Decline
+                            </Button>
+                          ) : null}
+                          {hasPermission('user.status') && row.status !== 'pending' ? (
                             <Button size="sm" onClick={() => setStatusTarget(row)}>
                               Status
                             </Button>
@@ -305,6 +335,75 @@ export default function UsersPage() {
           toast.notify(password ? 'Account created with a temporary password.' : 'Account updated.', 'success');
           await queryClient.invalidateQueries({ queryKey: ['users'] });
         }}
+      />
+
+      {/*
+        A pending registration is the one case where the administrator needs to see the
+        details the candidate supplied before deciding, so they are part of the dialog rather
+        than a second screen the approver has to go and find.
+      */}
+      <ConfirmDialog
+        open={Boolean(approveTarget)}
+        title={`Approve ${approveTarget?.full_name ?? ''}?`}
+        tone="primary"
+        confirmLabel="Approve registration"
+        busy={approve.isPending}
+        onConfirm={() => approveTarget && approve.mutate(approveTarget.id)}
+        onCancel={() => setApproveTarget(null)}
+        message={
+          <>
+            <p>
+              Approving lets this candidate sign in with the password they chose, and activates
+              their candidate record.
+            </p>
+            <dl className="definition-list">
+              <div>
+                <dt>Candidate</dt>
+                <dd>{approveTarget?.full_name}</dd>
+              </div>
+              <div>
+                <dt>Email</dt>
+                <dd>{approveTarget?.email}</dd>
+              </div>
+              <div>
+                <dt>Phone</dt>
+                <dd>{approveTarget?.phone ?? 'Not given'}</dd>
+              </div>
+              <div>
+                <dt>Date of birth</dt>
+                <dd>{approveTarget?.date_of_birth ?? 'Not given'}</dd>
+              </div>
+              <div>
+                <dt>Gender</dt>
+                <dd>{approveTarget?.gender ? titleCase(approveTarget.gender) : 'Not given'}</dd>
+              </div>
+              <div>
+                <dt>Candidate number</dt>
+                <dd>{approveTarget?.student_code ?? 'Not assigned'}</dd>
+              </div>
+              <div>
+                <dt>Registered</dt>
+                <dd>{approveTarget ? formatDateTime(approveTarget.created_at) : ''}</dd>
+              </div>
+            </dl>
+            {approveTarget && !approveTarget.email_verified_at ? (
+              <p className="text-sm text-muted">
+                This candidate has not confirmed their email address yet. Approving still works —
+                the address is unverified.
+              </p>
+            ) : null}
+          </>
+        }
+      />
+
+      <ConfirmDialog
+        open={Boolean(declineTarget)}
+        title={`Decline ${declineTarget?.full_name ?? ''}?`}
+        message="The account is disabled and cannot sign in. The registration and its audit trail are kept, so an administrator can activate it later if the decision changes."
+        confirmLabel="Decline registration"
+        busy={setStatus.isPending}
+        onConfirm={() => declineTarget && setStatus.mutate({ id: declineTarget.id, status: 'disabled' })}
+        onCancel={() => setDeclineTarget(null)}
       />
 
       <ConfirmDialog

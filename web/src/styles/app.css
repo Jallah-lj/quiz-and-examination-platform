@@ -964,7 +964,9 @@ table.data-table {
   font-size: 0.88rem;
 }
 .definition-list dt { color: var(--ink-500); }
-.definition-list dd { margin: 0; color: var(--ink-900); }
+/* A value can be a long unbroken string — an email address, a reference code — and must wrap
+   inside its own column rather than widening the dialog that holds it. */
+.definition-list dd { margin: 0; color: var(--ink-900); overflow-wrap: anywhere; }
 
 /* ------------------------------------------------------------ misc utilities */
 .text-muted { color: var(--ink-500); }

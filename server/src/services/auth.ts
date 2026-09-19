@@ -12,6 +12,7 @@ import {
 import { AppError, conflict, forbidden, notFound, unauthenticated, validationError } from '../lib/errors';
 import { addHours, addMinutes, isPast, nowIso } from '../lib/time';
 import { PERMISSIONS, ROLE_PERMISSIONS } from '../lib/rbac';
+import type { StudentGender } from '../lib/validation';
 import type { AuthUser, RoleCode } from '../types';
 import { sendAccountEmail } from '../lib/mailer';
 import { recordAudit } from './audit';
@@ -109,7 +110,9 @@ function assertAccountUsable(row: UserRow): void {
     throw forbidden('This account has been suspended. Contact your administrator.');
   }
   if (row.status === 'pending') {
-    throw forbidden('This account is not active yet. Please contact your administrator.');
+    throw forbidden(
+      'Your registration is awaiting approval by an institution administrator. You will be able to sign in once it has been approved.',
+    );
   }
   if (row.institution_status && row.institution_status !== 'active') {
     throw forbidden('The institution for this account is not active.');
@@ -629,7 +632,17 @@ export function verifyEmailToken(db: Db, token: string): { userId: number } {
 /** Self-registration is restricted to student accounts and requires an institution join code. */
 export async function selfRegister(
   db: Db,
-  input: { fullName: string; email: string; password: string; institutionId: number; studentCode?: string },
+  input: {
+    fullName: string;
+    email: string;
+    password: string;
+    institutionId: number;
+    studentCode?: string;
+    /** The candidate's own details, recorded on the student row the registry vets. */
+    phone?: string;
+    dateOfBirth?: string;
+    gender?: StudentGender;
+  },
   meta: LoginMeta,
 ): Promise<{ userId: number; verificationToken: string }> {
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(input.email);
@@ -647,8 +660,8 @@ export async function selfRegister(
   const created = db.transaction(() => {
     const info = db
       .prepare(
-        `INSERT INTO users (institution_id, role_id, full_name, email, password_hash, status, created_at, updated_at)
-         VALUES (?,?,?,?,?, 'pending', ?, ?)`,
+        `INSERT INTO users (institution_id, role_id, full_name, email, password_hash, status, phone, created_at, updated_at)
+         VALUES (?,?,?,?,?, 'pending', ?, ?, ?)`,
       )
       .run(
         institution.id,
@@ -656,15 +669,29 @@ export async function selfRegister(
         input.fullName,
         input.email,
         passwordHash,
+        input.phone?.trim() || null,
         nowIso(),
         nowIso(),
       );
     const userId = Number(info.lastInsertRowid);
     const code = input.studentCode?.trim() || `REG-${String(userId).padStart(5, '0')}`;
+    /*
+     * The candidate record starts inactive and unclassed. It carries the details the
+     * candidate supplied so an administrator can vet the registration before approving it;
+     * a class and a matriculation number are assigned by the registry afterwards.
+     */
     db.prepare(
-      `INSERT INTO students (user_id, institution_id, student_code, status, created_at, updated_at)
-       VALUES (?,?,?, 'inactive', ?, ?)`,
-    ).run(userId, institution.id, code, nowIso(), nowIso());
+      `INSERT INTO students (user_id, institution_id, student_code, date_of_birth, gender, status, created_at, updated_at)
+       VALUES (?,?,?,?,?, 'inactive', ?, ?)`,
+    ).run(
+      userId,
+      institution.id,
+      code,
+      input.dateOfBirth?.trim() || null,
+      input.gender ?? null,
+      nowIso(),
+      nowIso(),
+    );
     return userId;
   })();
 
